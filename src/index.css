@@ -1,0 +1,297 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --font-serif: 'Georgia', 'Cormorant Garamond', serif;
+    --font-sans: 'Manrope', system-ui, sans-serif;
+
+    /* ============================================
+       THEME TOKENS — "Тёплый день" (default, beige)
+       Switch themes by setting data-theme="night" on
+       the root wrapper (see App.tsx). Add a new theme
+       by adding another [data-theme="..."] block below.
+       ============================================ */
+    --bg: #FDFBF7;
+    --bg-elevated: #FFFFFF;
+    --bg-card: #F7F2EA;
+    --bg-soft: #F0E6D6;
+    --bg-nav: rgba(253, 251, 247, 0.85);
+    --overlay: rgba(62, 44, 35, 0.4);
+
+    --border: #E4D8C4;
+
+    --accent: #A9784F;
+    --accent-dark: #8B5E3C;
+    --accent-2: #C97B8C;
+    --accent-2-dark: #B5647A;
+    --on-accent: #FDFBF7;
+
+    --text: #5C3D26;
+    --text-secondary: #6B5844;
+    --text-muted: #8B7A66;
+    --text-faint: #B99B7A;
+
+    --locked-fill: #D8C3A5;
+    --locked-border: #E4D8C4;
+    --locked-text: #C9AD87;
+
+    --accent-glow: rgba(169, 120, 79, 0.35);
+    --accent-glow-strong: rgba(169, 120, 79, 0.65);
+    --accent2-glow: rgba(201, 123, 140, 0.25);
+    --accent2-glow-strong: rgba(201, 123, 140, 0.45);
+  }
+
+  /* ============================================
+     THEME TOKENS — "Звёздная ночь" (the original
+     dark theme, kept selectable via the toggle)
+     ============================================ */
+  [data-theme="night"] {
+    --bg: #0F081D;
+    --bg-elevated: #120B24;
+    --bg-card: rgba(255, 255, 255, 0.05);
+    --bg-soft: rgba(0, 0, 0, 0.3);
+    --bg-nav: rgba(0, 0, 0, 0.4);
+    --overlay: rgba(0, 0, 0, 0.7);
+
+    --border: rgba(255, 255, 255, 0.1);
+
+    --accent: #FFD700;
+    --accent-dark: #E5C100;
+    --accent-2: #FFB6C1;
+    --accent-2-dark: #FF9FB3;
+    --on-accent: #1A102D;
+
+    --text: #FFFFFF;
+    --text-secondary: #E9E3F5;
+    --text-muted: #C9C0E0;
+    --text-faint: #9891B8;
+
+    --locked-fill: #334155;
+    --locked-border: rgba(255, 255, 255, 0.1);
+    --locked-text: #64748b;
+
+    --accent-glow: rgba(255, 215, 0, 0.35);
+    --accent-glow-strong: rgba(255, 215, 0, 0.65);
+    --accent2-glow: rgba(255, 182, 193, 0.25);
+    --accent2-glow-strong: rgba(255, 182, 193, 0.45);
+  }
+
+  /* ============================================
+     THEME TOKENS — "Рассвет" (soft peach → lavender)
+     ============================================ */
+  [data-theme="dawn"] {
+    --bg: #FBEAE0;
+    --bg-elevated: #FFFFFF;
+    --bg-card: rgba(255, 255, 255, 0.55);
+    --bg-soft: rgba(255, 255, 255, 0.4);
+    --bg-nav: rgba(255, 246, 242, 0.85);
+    --overlay: rgba(122, 74, 92, 0.35);
+
+    --border: rgba(232, 137, 107, 0.25);
+
+    --accent: #E8896B;
+    --accent-dark: #D97AA0;
+    --accent-2: #B79FD1;
+    --accent-2-dark: #9B7ABF;
+    --on-accent: #FFF8F2;
+
+    --text: #7A4A5C;
+    --text-secondary: #8A5A6B;
+    --text-muted: #9B7A8A;
+    --text-faint: #C7A8B8;
+
+    --locked-fill: #E8C4D6;
+    --locked-border: rgba(232, 137, 107, 0.2);
+    --locked-text: #C9A8B8;
+
+    --accent-glow: rgba(232, 137, 107, 0.35);
+    --accent-glow-strong: rgba(232, 137, 107, 0.6);
+    --accent2-glow: rgba(183, 159, 209, 0.3);
+    --accent2-glow-strong: rgba(183, 159, 209, 0.5);
+  }
+
+  /* ============================================
+     THEME TOKENS — "Мятный сад" (sage + honey)
+     ============================================ */
+  [data-theme="mint"] {
+    --bg: #F5F7F0;
+    --bg-elevated: #FFFFFF;
+    --bg-card: #EDF1E6;
+    --bg-soft: #E8EDDF;
+    --bg-nav: rgba(245, 247, 240, 0.85);
+    --overlay: rgba(62, 74, 58, 0.35);
+
+    --border: #DCE5D2;
+
+    --accent: #7C9473;
+    --accent-dark: #64775C;
+    --accent-2: #C9A66B;
+    --accent-2-dark: #B08F55;
+    --on-accent: #F5F7F0;
+
+    --text: #3E4A3A;
+    --text-secondary: #4E5C48;
+    --text-muted: #7A8873;
+    --text-faint: #A3B39A;
+
+    --locked-fill: #CFE0C4;
+    --locked-border: #DCE5D2;
+    --locked-text: #A3B396;
+
+    --accent-glow: rgba(124, 148, 115, 0.3);
+    --accent-glow-strong: rgba(124, 148, 115, 0.55);
+    --accent2-glow: rgba(201, 166, 107, 0.25);
+    --accent2-glow-strong: rgba(201, 166, 107, 0.45);
+  }
+
+  /* ============================================
+     THEME TOKENS — "Полночный бархат" (emerald + gold)
+     ============================================ */
+  [data-theme="velvet"] {
+    --bg: #0F1F1A;
+    --bg-elevated: #16281F;
+    --bg-card: rgba(255, 255, 255, 0.04);
+    --bg-soft: rgba(255, 255, 255, 0.03);
+    --bg-nav: rgba(15, 31, 26, 0.85);
+    --overlay: rgba(0, 0, 0, 0.6);
+
+    --border: rgba(212, 175, 55, 0.2);
+
+    --accent: #D4AF37;
+    --accent-dark: #B8912A;
+    --accent-2: #6FA98A;
+    --accent-2-dark: #57896D;
+    --on-accent: #14102B;
+
+    --text: #F5EFDD;
+    --text-secondary: #D9D0B8;
+    --text-muted: #B8AF9A;
+    --text-faint: #8A8270;
+
+    --locked-fill: #3A4A40;
+    --locked-border: rgba(212, 175, 55, 0.15);
+    --locked-text: #6E7A6A;
+
+    --accent-glow: rgba(212, 175, 55, 0.35);
+    --accent-glow-strong: rgba(212, 175, 55, 0.6);
+    --accent2-glow: rgba(111, 169, 138, 0.3);
+    --accent2-glow-strong: rgba(111, 169, 138, 0.5);
+  }
+
+  body {
+    font-family: var(--font-sans);
+    background-color: var(--bg);
+    color: var(--text);
+    touch-action: manipulation;
+    margin: 0;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+
+  h1, h2, h3, .font-serif-heading {
+    font-family: var(--font-serif);
+  }
+}
+
+@keyframes twinkle {
+  0%, 100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.3);
+  }
+}
+
+@keyframes pulseGlow {
+  0%, 100% {
+    box-shadow: 0 0 20px var(--accent-glow), 0 0 35px var(--accent2-glow);
+  }
+  50% {
+    box-shadow: 0 0 30px var(--accent-glow-strong), 0 0 50px var(--accent2-glow-strong);
+  }
+}
+
+@keyframes heartBurst {
+  0% { transform: scale(0.3); opacity: 0; }
+  25% { transform: scale(1.15); opacity: 1; }
+  40% { transform: scale(1); opacity: 1; }
+  100% { transform: scale(1); opacity: 0; }
+}
+
+@keyframes pop {
+  from { transform: scale(0); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+@keyframes rhythmPulse {
+  from { transform: scale(0); opacity: 0.9; }
+  to { transform: scale(1); opacity: 0.15; }
+}
+
+@keyframes floatSlow {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-8px) rotate(2deg);
+  }
+}
+
+.animate-twinkle {
+  animation: twinkle var(--twinkle-duration, 3s) infinite ease-in-out var(--twinkle-delay, 0s);
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 3s infinite ease-in-out;
+}
+
+.animate-float-slow {
+  animation: floatSlow 6s ease-in-out infinite;
+}
+
+/* Glass Theme Classes — colors follow the active theme via CSS vars */
+.glass-card {
+  background: var(--bg-card);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  box-shadow: 0 20px 50px var(--overlay);
+}
+
+.glass-pill {
+  background: var(--bg-soft);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+}
+
+.btn-gold {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dark) 100%);
+  color: var(--on-accent);
+  font-weight: 700;
+  box-shadow: 0 10px 20px var(--accent-glow);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.btn-gold:hover {
+  transform: scale(1.02);
+  box-shadow: 0 12px 25px var(--accent-glow-strong);
+}
+
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-twinkle,
+  .animate-pulse-glow,
+  .animate-float-slow {
+    animation: none !important;
+  }
+}
