@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import {
   X, ShieldCheck, BarChart3, BookOpen, Gamepad2, Loader2, Save, RotateCcw,
   Image as ImageIcon, Heart, Video as VideoIcon, Link2, Check, Users, Flame,
-  CalendarCheck, AlertCircle, User, Clock,
+  CalendarCheck, AlertCircle, User, Clock, Volume2, RefreshCw, XCircle, CheckCircle2, HelpCircle,
 } from 'lucide-react';
 import { DAILY_MESSAGES } from '../data/constants';
 import {
@@ -15,6 +15,7 @@ import { fetchUsersProgress, fetchDayLogs, UserProgressSnapshot, DayLogEntry } f
 import { fetchAllReplies } from '../utils/extrasUtils';
 import { DailyReply } from '../types';
 import { getCurrentUser } from '../utils/authUtils';
+import { checkAudioUrl, AudioCheckResult } from '../utils/audioUtils';
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -43,7 +44,7 @@ function formatDateTimeKk(timestamp: number): string {
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
-  const [activeTab, setActiveTab] = useState<'stats' | 'content' | 'schedule' | 'partner'>('stats');
+  const [activeTab, setActiveTab] = useState<'stats' | 'content' | 'schedule' | 'partner' | 'audio'>('stats');
 
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
@@ -74,6 +75,11 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const [dayOrder, setDayOrder] = useState<'latest' | 'oldest'>('latest');
   const [expandedDay, setExpandedDay] = useState<number | null>(null);
+
+  // --- Audio (voice message) health check ---
+  const [audioResults, setAudioResults] = useState<Record<number, AudioCheckResult>>({});
+  const [audioChecking, setAudioChecking] = useState(false);
+  const [audioCheckedAt, setAudioCheckedAt] = useState<number | null>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -259,6 +265,53 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
     return map;
   }, [allReplies]);
 
+  // Every day (default or admin-overridden) that currently has a voice
+  // message attached — this is the full list the audio check runs against.
+  const voiceDays = useMemo(() => {
+    return Array.from({ length: 30 }, (_, i) => i + 1)
+      .map((day) => {
+        const base = DAILY_MESSAGES[(day - 1) % DAILY_MESSAGES.length];
+        const effective = applyMessageOverride(base, overrides[day]);
+        return { day, voiceUrl: effective.voiceUrl || '' };
+      })
+      .filter((d) => !!d.voiceUrl);
+  }, [overrides]);
+
+  const runAudioCheck = async () => {
+    if (voiceDays.length === 0) return;
+    setAudioChecking(true);
+    // Mark everything "checking" up front so the UI shows progress rather
+    // than stale results while requests are in flight.
+    setAudioResults((prev) => {
+      const next = { ...prev };
+      voiceDays.forEach((d) => { next[d.day] = { status: 'checking' }; });
+      return next;
+    });
+
+    await Promise.all(
+      voiceDays.map(async (d) => {
+        const result = await checkAudioUrl(d.voiceUrl);
+        setAudioResults((prev) => ({ ...prev, [d.day]: result }));
+      })
+    );
+
+    setAudioChecking(false);
+    setAudioCheckedAt(Date.now());
+  };
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'audio') return;
+    if (audioCheckedAt === null && !audioChecking) {
+      runAudioCheck();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, activeTab]);
+
+  const brokenAudioCount = useMemo(
+    () => Object.values(audioResults).filter((r) => r.status === 'missing' || r.status === 'error').length,
+    [audioResults]
+  );
+
   const partnerDayRows = useMemo(() => {
     if (!selectedPartner) return [];
     const days = Array.from({ length: selectedPartner.daysPlayed }, (_, i) => i + 1);
@@ -347,6 +400,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
             {missingReplyCount > 0 && (
               <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">
                 {missingReplyCount > 9 ? '9+' : missingReplyCount}
+              </span>
+            )}
+          </button>
+          <button
+            onClick={() => setActiveTab('audio')}
+            className={`flex-1 py-1.5 rounded-xl font-medium transition flex items-center justify-center gap-1 relative ${
+              activeTab === 'audio' ? 'btn-gold font-bold shadow-sm' : 'text-[var(--text-muted)]'
+            }`}
+          >
+            <Volume2 className="w-3.5 h-3.5" />
+            Аудио
+            {brokenAudioCount > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">
+                {brokenAudioCount > 9 ? '9+' : brokenAudioCount}
               </span>
             )}
           </button>
@@ -748,6 +815,94 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose }) => {
                       {scheduleBusyDay === day && <Loader2 className="w-3.5 h-3.5 animate-spin text-[var(--accent)]" />}
                     </div>
                   ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'audio' && (
+            <div>
+              <p className="text-[11px] text-[var(--text-muted)] mb-3">
+                Дауыстық хабарламасы бар әр күн үшін файл шынымен ашылып, ойнатылатынын тексереді
+                (телефонда «шоқжұлдыз алғанда аудио ашылмайды» деген мәселе осы жерден көрінеді).
+              </p>
+
+              <button
+                onClick={runAudioCheck}
+                disabled={audioChecking || voiceDays.length === 0}
+                className="w-full mb-3 flex items-center justify-center gap-1.5 py-2.5 rounded-xl btn-gold text-xs font-bold disabled:opacity-60"
+              >
+                {audioChecking ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <RefreshCw className="w-3.5 h-3.5" />
+                )}
+                {audioChecking ? 'Тексерілуде…' : 'Барлығын қайта тексеру'}
+              </button>
+
+              {audioCheckedAt && !audioChecking && (
+                <p className="text-[10px] text-[var(--text-faint)] mb-3">
+                  Соңғы тексеру: {formatDateTimeKk(audioCheckedAt)}
+                  {brokenAudioCount > 0
+                    ? ` · ${brokenAudioCount} күнде дауыс ашылмайды`
+                    : ' · барлығы дұрыс ашылады'}
+                </p>
+              )}
+
+              {voiceDays.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-10 text-center text-[var(--text-faint)] text-xs">
+                  <Volume2 className="w-6 h-6 mb-2 opacity-50" />
+                  Ешбір күнге дауыстық хабарлама тағайындалмаған
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {voiceDays.map(({ day, voiceUrl }) => {
+                    const result = audioResults[day];
+                    const status = result?.status;
+                    return (
+                      <div
+                        key={day}
+                        className="flex items-center gap-2 p-2.5 rounded-xl bg-[var(--bg-card)] border border-[var(--border)]"
+                      >
+                        <span className="w-7 flex-shrink-0 text-xs font-semibold text-[var(--accent)]">{day}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-xs text-[var(--text)] truncate">{voiceUrl}</div>
+                          {result?.detail && (status === 'missing' || status === 'error') && (
+                            <div className="text-[10px] text-rose-500 truncate">{result.detail}</div>
+                          )}
+                        </div>
+
+                        {status === 'checking' && (
+                          <Loader2 className="w-4 h-4 flex-shrink-0 animate-spin text-[var(--text-faint)]" />
+                        )}
+                        {status === 'ok' && (
+                          <span className="flex items-center gap-1 flex-shrink-0 text-[10px] font-semibold text-emerald-600">
+                            <CheckCircle2 className="w-4 h-4" /> Ашылады
+                          </span>
+                        )}
+                        {(status === 'missing' || status === 'error') && (
+                          <span className="flex items-center gap-1 flex-shrink-0 text-[10px] font-semibold text-rose-500">
+                            <XCircle className="w-4 h-4" /> Ашылмайды
+                          </span>
+                        )}
+                        {!status && (
+                          <HelpCircle className="w-4 h-4 flex-shrink-0 text-[var(--text-faint)]" />
+                        )}
+
+                        {(status === 'missing' || status === 'error') && (
+                          <button
+                            onClick={() => {
+                              setSelectedDay(day);
+                              setActiveTab('content');
+                            }}
+                            className="flex-shrink-0 text-[10px] font-semibold text-[var(--accent)] underline underline-offset-2"
+                          >
+                            Түзету
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>
