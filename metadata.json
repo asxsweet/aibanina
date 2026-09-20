@@ -1,0 +1,6 @@
+{
+  "name": "Наше созвездие",
+  "description": "Ежедневная романтическая мини-игра и растущее созвездие любви для отношений на расстоянии",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
