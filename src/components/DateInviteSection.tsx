@@ -42,13 +42,13 @@ function getTodayDateStr(): string {
 // Dodge-count-indexed captions shown under the title while she tries (and
 // fails) to click "No" — purely playful, mirrors the reference video's tone.
 const DODGE_CAPTIONS = [
-  'Ойлан тағы...',
-  'Сонша ұялшақсың ба?',
-  '«Жоқ» дегің келе ме шынымен?',
-  'Гүл бірте-бірте сола бастады...',
-  'Тағы да? 🥺',
+  'Ойлан',
+  'Менен ұялып тұрсың ба?',
+  'Шынымен «Жоқ» дегің келе ме?',
+  'Хотябы гүлді аясайшы солып жатыр ғой 🌸',
+  'Тағы да ойлан? 🥺',
   'Соңғы мүмкіндігің!',
-  'Жарайды, жалғастыра беремін 😌',
+  'Ия демейінше бітпейді 😌',
 ];
 
 const ROAM_WIDTH = 260;
@@ -124,7 +124,7 @@ export const DateInviteSection: React.FC<DateInviteSectionProps> = ({
   }, [invite]);
 
   const handleShare = async () => {
-    const shareText = `Бізде свидание жоспарланды 💌\n\n${letterText}`;
+    const shareText = `Бізде кездесу жоспарланды 💌\n\n${letterText}`;
     if (navigator.share) {
       try {
         await navigator.share({ text: shareText });
@@ -249,7 +249,7 @@ export const DateInviteSection: React.FC<DateInviteSectionProps> = ({
       <div className="w-full max-w-xl mx-auto px-4 py-8 flex flex-col items-center gap-4">
         <div className="w-full rounded-[28px] bg-[var(--bg-card)] border border-[var(--border)] p-6 shadow-sm flex flex-col items-center text-center">
           <span className="text-[10px] uppercase tracking-[0.25em] text-[var(--accent-2)] font-bold mb-2">
-            Ресми етейік
+            Нақтылап алайық
           </span>
           <h2 className="font-serif text-2xl italic text-[var(--text)] mb-1 flex items-center gap-2">
             <CalendarDays className="w-5 h-5 text-[var(--accent)]" />
@@ -332,7 +332,7 @@ export const DateInviteSection: React.FC<DateInviteSectionProps> = ({
           Кішкене сұрақ
         </span>
         <h2 className="font-serif text-2xl italic text-[var(--text)] mb-1">
-          Свиданияға <span className="text-[var(--accent)] not-italic font-bold">барасың ба</span>?
+          Кездесуге <span className="text-[var(--accent)] not-italic font-bold">шығасың ба</span>?
         </h2>
         <p className="text-xs text-[var(--text-faint)] mb-4 h-4">{DODGE_CAPTIONS[captionIndex]}</p>
 
