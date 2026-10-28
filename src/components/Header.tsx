@@ -89,7 +89,7 @@ export const Header: React.FC<HeaderProps> = ({
     { label: 'Жарыс', icon: Trophy, action: onOpenLeaderboard },
     { label: 'Хаттар', icon: Mail, action: onOpenCapsules },
     { label: 'Армандар', icon: ListChecks, action: onOpenDreams },
-    { label: 'Жылы бұрыш', icon: Heart, action: onOpenIdeas },
+   // { label: 'Жылы бұрыш', icon: Heart, action: onOpenIdeas },
   ];
 
   return (
