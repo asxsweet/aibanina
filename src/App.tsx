@@ -1,8 +1,15 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { UserProgress, DailyMessage, Photo, AppTab, DateInvite } from './types';
+import { UserProgress, DailyMessage, Photo, AppTab, DateInvite, DailyContent } from './types';
 import { DAILY_MESSAGES, MILESTONE_BONUSES, MilestoneBonus } from './data/constants';
 import { fetchPhotos } from './utils/photoUtils';
 import { fetchMessageOverrides, applyMessageOverride, MessageOverride } from './utils/adminUtils';
+import { buildDailyContent } from './utils/dailyContent';
+import {
+  fetchDayAnswer,
+  installDailyQuestionFlush,
+  flushPendingAnswers,
+  getPendingAnswerCount,
+} from './utils/dailyQuestionApi';
 import {
   loadProgress,
   saveProgress,
@@ -46,6 +53,8 @@ import { Header } from './components/Header';
 import { GameHub, GAME_LABELS, useDailyGameId } from './components/GameHub';
 import { ConstellationMap } from './components/ConstellationMap';
 import { MessageCard } from './components/MessageCard';
+import { DailyQuestionModal } from './components/DailyQuestionModal';
+import { MyAnswersModal } from './components/MyAnswersModal';
 import { SettingsModal } from './components/SettingsModal';
 import { ProfileModal } from './components/ProfileModal';
 import { Gallery } from './components/Gallery';
@@ -75,6 +84,7 @@ import { QuickActions } from './components/QuickActions';
 import { GalaxyTeaser } from './components/GalaxyTeaser';
 import { logDayCompletion } from './utils/trackingUtils';
 import { fetchActiveDateInvite, respondToDateInvite } from './utils/dateInviteUtils';
+import { HelpCircle, MessageCircleHeart } from 'lucide-react';
 import { Heart, Sparkles, BookOpen, X, LayoutDashboard } from 'lucide-react';
 
 // Remembers, per browser, which invite id the partner has already seen —
@@ -89,6 +99,11 @@ export default function App() {
   const [user, setUser] = useState<AppUser | null>(null);
   const [progress, setProgress] = useState<UserProgress>(getDefaultProgress());
   const [activeMessage, setActiveMessage] = useState<DailyMessage | null>(null);
+  // Today's "men turaly suraq" — the alternative daily content. At most one
+  // of activeMessage / activeQuestion is ever open at a time.
+  const [activeQuestion, setActiveQuestion] = useState<DailyContent | null>(null);
+  const [isMyAnswersOpen, setIsMyAnswersOpen] = useState<boolean>(false);
+  const [todayQuestionAnswered, setTodayQuestionAnswered] = useState<boolean>(false);
   const [linkedPhotos, setLinkedPhotos] = useState<Photo[]>([]);
   const [messageOverrides, setMessageOverrides] = useState<Record<number, MessageOverride>>({});
   const [isTodayWinModal, setIsTodayWinModal] = useState<boolean>(false);
@@ -302,6 +317,14 @@ export default function App() {
     [messageOverrides]
   );
 
+  // The unified daily content for a day: letter or question, decided
+  // purely from the stored override (no randomness — stable across page
+  // reloads, devices and replays). Days without an override stay letters.
+  const getContentForDay = useCallback(
+    (dayNumber: number): DailyContent => buildDailyContent(dayNumber, messageOverrides[dayNumber]),
+    [messageOverrides]
+  );
+
   // Joint ("our") streak + the date-bound surprises + the meeting countdown all
   // come from the server and are refreshed once the player's own data is in sync.
   const playedTodayRef = useRef(false);
@@ -388,12 +411,30 @@ export default function App() {
     return () => clearTimeout(timer);
   }, [highlightDay]);
 
-  const showCurrentMessage = useCallback((dayNumber: number) => {
-    const msgIndex = (Math.max(1, dayNumber) - 1) % DAILY_MESSAGES.length;
-    const base = { ...DAILY_MESSAGES[msgIndex], dayNumber };
-    setActiveMessage(applyMessageOverride(base, messageOverrides[dayNumber]));
-    setIsTodayWinModal(true);
-  }, [messageOverrides]);
+  // Opens the day's reward content — exactly ONE kind per day: a letter on
+  // letter days, the "about me" question on question days. Never both.
+  const showRewardContent = useCallback(
+    (dayNumber: number) => {
+      const content = getContentForDay(dayNumber);
+      if (content.contentType === 'question') {
+        setIsTodayWinModal(false);
+        setActiveMessage(null);
+        setActiveQuestion(content);
+      } else {
+        setActiveQuestion(null);
+        setActiveMessage({
+          id: content.dayNumber,
+          dayNumber: content.dayNumber,
+          title: content.title || '',
+          text: content.text || '',
+          hint: content.hint,
+          voiceUrl: content.voiceUrl,
+        });
+        setIsTodayWinModal(true);
+      }
+    },
+    [getContentForDay]
+  );
 
   useEffect(() => {
     if (!user || !isInitialized || !playedToday) return;
@@ -403,8 +444,48 @@ export default function App() {
     if (autoShownDateRef.current === todayStr) return;
 
     autoShownDateRef.current = todayStr;
-    showCurrentMessage(Math.max(1, progress.daysPlayed));
-  }, [user, isInitialized, playedToday, progress.daysPlayed, todayStr, showCurrentMessage]);
+    showRewardContent(Math.max(1, progress.daysPlayed));
+  }, [user, isInitialized, playedToday, progress.daysPlayed, todayStr, showRewardContent]);
+
+  // The home "answer today's question" card: only meaningful when today's
+  // content type is a question AND the day has been claimed (the star and
+  // stardust are theirs regardless of the answer).
+  const rewardDay = Math.max(1, progress.daysPlayed);
+  const rewardContent = getContentForDay(rewardDay);
+  const todayIsQuestionDay = playedToday && hasRewardToday && rewardContent.contentType === 'question';
+
+  useEffect(() => {
+    if (!user) return;
+    if (!todayIsQuestionDay) {
+      setTodayQuestionAnswered(false);
+      return;
+    }
+    let cancelled = false;
+    fetchDayAnswer(rewardDay)
+      .then((existing) => {
+        if (!cancelled) setTodayQuestionAnswered(!!existing);
+      })
+      .catch(() => {
+        // Offline — she can still open the modal without the saved copy.
+        if (!cancelled) setTodayQuestionAnswered(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.email, todayIsQuestionDay, rewardDay, todayStr]);
+
+  // Offline answer queue: send queued answers once the connection returns.
+  useEffect(() => {
+    if (!user) return;
+    installDailyQuestionFlush();
+    if (getPendingAnswerCount() > 0) {
+      flushPendingAnswers()
+        .then((sent) => {
+          if (sent > 0) setResultLines([`💌 Сақталған ${sent} жауап жіберілді`]);
+        })
+        .catch(() => undefined);
+    }
+  }, [user?.email]);
 
   useEffect(() => {
     const cached = getCurrentUser();
@@ -504,6 +585,9 @@ export default function App() {
 
       if (alreadyClaimed) {
         // Bonus replay: no new star, but a little stardust (capped per day).
+        // The day's main content is NOT auto-opened again — a manual
+        // "Қайта қарау" (the map star / the question button at home) is
+        // always available.
         if (isBonus) {
           const award = awardBonusStardust(progress, difficulty, todayStr);
           setProgress(award.progress);
@@ -513,16 +597,17 @@ export default function App() {
               : 'Бүгінгі бонус тозаңы таусылды ✨ — ертең тағы бар!'
           );
         }
-        showCurrentMessage(Math.max(1, progress.daysPlayed));
       } else {
         lines.push(`+${DAILY_STAR_STARDUST} ✨ жұлдыз тозаңы`);
         updateProgress();
-        showCurrentMessage(progress.daysPlayed + 1);
+        // Star + stardust are already granted; the day's ONE content item
+        // (letter OR question) opens now — the answer is never mandatory.
+        showRewardContent(progress.daysPlayed + 1);
       }
 
       if (lines.length > 0) setResultLines(lines);
     },
-    [hasRewardToday, progress, difficulty, todayStr, showCurrentMessage, updateProgress]
+    [hasRewardToday, progress, difficulty, todayStr, showRewardContent, updateProgress]
   );
 
   // Daily-task reward (once per day, GameHub guards it) → stardust counter.
@@ -542,9 +627,23 @@ export default function App() {
     setActiveMessage(null);
   }, [activeMessage, isTodayWinModal]);
 
+  // "Кейін жауап беремін" — the day stays complete: the already-given star
+  // and stardust are never taken back, and the question can be reopened
+  // from the home button at any time.
+  const handleCloseQuestion = useCallback(() => {
+    setActiveQuestion(null);
+  }, []);
+
   // --- Stardust shop ---------------------------------------------------
   const nextStarDay = progress.daysPlayed + 1;
   const nextStarMessage = getMessageForDay(nextStarDay);
+  // "Tomorrow" teasers never spoil a question day — they only hint at the
+  // content type; the full question is hidden until the day arrives.
+  const nextStarContent = getContentForDay(nextStarDay);
+  const nextPeekTitle =
+    nextStarContent.contentType === 'question'
+      ? '💌 Мен туралы сұрақ'
+      : nextStarMessage.title;
   const peekRevealed = (progress.revealedDays || []).includes(nextStarDay);
 
   const handleBuyShield = () => {
@@ -632,6 +731,7 @@ export default function App() {
     // `reset` is the one write the server accepts with a LOWER star count.
     if (user) saveProgress(resetState, user.email, { reset: true, syncRemote: true });
     setActiveMessage(null);
+    setActiveQuestion(null);
     setStreakBrokenNotice(false);
     setShieldNotice(null);
   };
@@ -647,6 +747,7 @@ export default function App() {
     setMeeting(null);
     setSpecialItems([]);
     setActiveMessage(null);
+    setActiveQuestion(null);
     setIsSettingsOpen(false);
   };
 
@@ -664,10 +765,15 @@ export default function App() {
     };
     setProgress(updated);
 
-    const msgIndex = (nextDayNum - 1) % DAILY_MESSAGES.length;
-    const base = { ...DAILY_MESSAGES[msgIndex], dayNumber: nextDayNum };
-    setActiveMessage(applyMessageOverride(base, messageOverrides[nextDayNum]));
-    setIsTodayWinModal(true);
+    const content = getContentForDay(nextDayNum);
+    if (content.contentType === 'question') {
+      setActiveQuestion(content);
+    } else {
+      const msgIndex = (nextDayNum - 1) % DAILY_MESSAGES.length;
+      const base = { ...DAILY_MESSAGES[msgIndex], dayNumber: nextDayNum };
+      setActiveMessage(applyMessageOverride(base, messageOverrides[nextDayNum]));
+      setIsTodayWinModal(true);
+    }
   };
 
   if (!user) {
@@ -848,10 +954,34 @@ export default function App() {
             {hasRewardToday && (
               <TomorrowTeaser
                 dayNumber={nextStarDay}
-                title={nextStarMessage.title}
+                title={nextPeekTitle}
                 revealed={peekRevealed}
                 onOpenShop={() => setIsShopOpen(true)}
               />
+            )}
+
+            {/* Today's question card — the alternative daily content. Shown
+                all day (not just once) so a postponed question can always
+                be answered or re-read later. */}
+            {todayIsQuestionDay && rewardContent.contentType === 'question' && (
+              <div className="w-full max-w-xl mx-auto px-4 mb-1">
+                <div className="p-3.5 rounded-2xl bg-[var(--accent-2)]/8 border border-[var(--accent-2)]/25">
+                  <div className="flex items-center gap-1.5 mb-1.5 text-[var(--accent-2-dark)] text-[10px] font-semibold uppercase tracking-wide">
+                    <HelpCircle className="w-3.5 h-3.5" />
+                    <span>{rewardContent.dayNumber}-күн · Бүгінгі сұрақ</span>
+                  </div>
+                  <p className="text-sm text-[var(--text)] font-medium leading-snug mb-2.5 line-clamp-3">
+                    {rewardContent.question}
+                  </p>
+                  <button
+                    onClick={() => setActiveQuestion(rewardContent)}
+                    className="w-full min-h-[44px] rounded-xl btn-gold text-xs font-bold flex items-center justify-center gap-1.5 transition active:scale-[0.99]"
+                  >
+                    <MessageCircleHeart className="w-4 h-4" />
+                    {todayQuestionAnswered ? 'Жауабыңды көру / өзгерту' : 'Бүгінгі сұраққа жауап беру'}
+                  </button>
+                </div>
+              </div>
             )}
 
             <QuickActions
@@ -932,6 +1062,19 @@ export default function App() {
         }
       />
 
+      {/* Today's "men turaly suraq" — opens instead of the letter on question days.
+          Never shown together with the letter modal: one content per day. */}
+      {activeQuestion && activeMessage === null && (
+        <DailyQuestionModal
+          content={activeQuestion}
+          onClose={handleCloseQuestion}
+          onSaved={() => setTodayQuestionAnswered(true)}
+        />
+      )}
+
+      {/* "Менің жауаптарым" — the user's own question-answer history */}
+      <MyAnswersModal isOpen={isMyAnswersOpen} onClose={() => setIsMyAnswersOpen(false)} />
+
       {/* Settings & Rules Modal */}
       <SettingsModal
         isOpen={isSettingsOpen}
@@ -955,6 +1098,10 @@ export default function App() {
         onClose={() => setIsProfileOpen(false)}
         user={user}
         onSave={handleUpdateProfile}
+        onOpenAnswers={() => {
+          setIsProfileOpen(false);
+          setIsMyAnswersOpen(true);
+        }}
       />
 
       {/* Preview mode: the admin is intentionally looking at the regular
@@ -1010,7 +1157,7 @@ export default function App() {
           stardust={progress.stardust || 0}
           shields={progress.shields || 0}
           nextDay={nextStarDay}
-          nextTitle={nextStarMessage.title}
+          nextTitle={nextPeekTitle}
           peekRevealed={peekRevealed}
           canPeek={hasRewardToday}
           onBuyShield={handleBuyShield}

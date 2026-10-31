@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { X, UserRound, Mail, Save, Check, Sparkles } from 'lucide-react';
+import { X, UserRound, Mail, Save, Check, Sparkles, MessageCircleHeart } from 'lucide-react';
 import { AppUser } from '../utils/authUtils';
 
 interface ProfileModalProps {
@@ -7,6 +7,8 @@ interface ProfileModalProps {
   onClose: () => void;
   user: AppUser;
   onSave: (updates: { name: string; bio: string }) => void;
+  /** Opens "Менің жауаптарым" — the daily-question answer history. */
+  onOpenAnswers?: () => void;
 }
 
 export const ProfileModal: React.FC<ProfileModalProps> = ({
@@ -14,6 +16,7 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
   onClose,
   user,
   onSave,
+  onOpenAnswers,
 }) => {
   const [name, setName] = useState(user.name);
   const [bio, setBio] = useState(user.bio || '');
@@ -108,6 +111,16 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
             <Mail className="w-3.5 h-3.5" />
             <span>{user.email}</span>
           </div>
+
+          {onOpenAnswers && (
+            <button
+              onClick={onOpenAnswers}
+              className="w-full flex items-center justify-center gap-2 rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] px-4 py-3 text-sm font-semibold text-[var(--text-secondary)] hover:bg-[var(--bg-soft)] transition min-h-[44px]"
+            >
+              <MessageCircleHeart className="w-4 h-4 text-[var(--accent-2)]" />
+              <span>Менің жауаптарым</span>
+            </button>
+          )}
 
           {error && (
             <div className="rounded-2xl border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-xs text-rose-500">

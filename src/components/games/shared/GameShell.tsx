@@ -181,6 +181,22 @@ export const GameShell: React.FC<GameShellProps> = ({
     buzz(10);
   };
 
+  // Ноутбук: Esc — пауза / жалғастыру
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (shell.phase === 'playing') {
+        gameAudio.play('button');
+        shell.pause();
+      } else if (shell.phase === 'paused') {
+        gameAudio.play('button');
+        shell.resume();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [shell.phase, shell.pause, shell.resume]);
+
   const phase = shell.phase;
   const over = shell.result;
   const live = phase === 'playing' || phase === 'paused';
@@ -445,7 +461,8 @@ export const GameShell: React.FC<GameShellProps> = ({
   );
 };
 
-const LifeDot = function LifeDot({ filled, key: _k }: { filled: boolean; key?: React.Key }): React.ReactElement {
+// key — тек JSX үшін типте тұр; оны оқымаймыз (React 19 «key is not a prop» ескертуін шығармау үшін)
+const LifeDot = function LifeDot({ filled }: { filled: boolean; key?: React.Key }): React.ReactElement {
   return (
     <svg width="13" height="13" viewBox="0 0 40 40" aria-hidden>
       <path

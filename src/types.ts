@@ -3,10 +3,62 @@ import type { ThemeName } from './data/themes';
 export interface DailyMessage {
   id: number;
   dayNumber: number;
-  title: string;
+  title?: string;
   text: string;
   hint?: string;
   voiceUrl?: string; // optional mp3 for the weekly voice-message days (every 7th day)
+  // Question variant: when `question` is non-empty this built-in day opens
+  // the "Бүгінгі сұрақ" modal instead of the letter — no admin override
+  // needed. Letter fields (title/text/hint) may be left out on those days;
+  // an admin override for the same day always wins over the built-in one.
+  question?: string;
+  questionId?: string;
+  questionHint?: string;
+  questionCategory?: QuestionCategory;
+}
+
+// What opens after the daily game: either the classic daily letter or an
+// "about me" question. Days whose stored data predates `contentType` are
+// always treated as letters (backward compatibility — nothing is lost).
+export type DailyContentType = 'letter' | 'question';
+
+export type QuestionCategory =
+  | 'favorites'
+  | 'memory'
+  | 'relationship'
+  | 'future'
+  | 'fun';
+
+// Unified daily content. Only the fields relevant to `contentType` are used.
+export interface DailyContent {
+  dayNumber: number;
+  contentType: DailyContentType;
+
+  // Letter fields
+  title?: string;
+  text?: string;
+  hint?: string;
+  voiceUrl?: string;
+
+  // Question fields
+  questionId?: string;
+  question?: string;
+  questionHint?: string;
+  questionCategory?: QuestionCategory;
+}
+
+// One saved answer to a daily question (the partner's own answer).
+export interface DailyQuestionAnswer {
+  id: string;
+  userId: string;
+  userName: string;
+  dayNumber: number;
+  date: string; // YYYY-MM-DD
+  questionId: string;
+  question: string; // snapshot of the question, survives later question edits
+  answer: string;
+  createdAt: number;
+  updatedAt: number;
 }
 
 export interface UserProgress {

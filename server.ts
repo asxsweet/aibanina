@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 import cron from 'node-cron';
 import { authGate, canAccessUser } from './server/auth';
 import { registerFeatureRoutes } from './server/features';
+import { registerDailyContentRoutes, DailyContentModel, DailyContentType } from './server/dailyContent';
 import { APP_TIMEZONE, getDateStringInTimezone, isValidDateStr } from './server/time';
 
 dotenv.config();
@@ -1416,25 +1417,22 @@ app.post('/api/admin/users-progress/:userId/reset', async (req, res) => {
 // the admin interface and partner-specific data continue to work.
 // these handlers, so they never see an unauthenticated request.
 
-interface IMessageOverride {
+// The daily message/content override model now lives in
+// ./server/dailyContent.ts together with the whole "letter or question"
+// daily-content system. TypeScript aliases for the legacy handlers below.
+const MessageOverrideModel = DailyContentModel;
+type IMessageOverride = {
   dayNumber: number;
+  contentType?: DailyContentType;
   title?: string;
   text?: string;
   hint?: string;
   voiceUrl?: string;
-}
-
-const MessageOverrideSchema = new mongoose.Schema<IMessageOverride>({
-  dayNumber: { type: Number, required: true, unique: true },
-  title: { type: String },
-  text: { type: String },
-  hint: { type: String },
-  voiceUrl: { type: String },
-});
-
-const MessageOverrideModel =
-  (mongoose.models.MessageOverride as mongoose.Model<IMessageOverride>) ||
-  mongoose.model<IMessageOverride>('MessageOverride', MessageOverrideSchema);
+  questionId?: string;
+  question?: string;
+  questionHint?: string;
+  questionCategory?: string;
+};
 
 interface IGameSchedule {
   dayNumber: number;
@@ -1480,7 +1478,10 @@ app.get('/api/admin/messages', async (req, res) => {
   }
 });
 
-// PUT /api/admin/messages/:day — create or update a day's custom content
+// PUT /api/admin/messages/:day — create or update a day's custom content.
+// `contentType` switches the day between the classic letter and an
+// "about me" question; letter-only fields and question-only fields are
+// kept out of each other's way (the client renders only the relevant set).
 app.put('/api/admin/messages/:day', async (req, res) => {
   const dayNumber = parseInt(req.params.day, 10);
   if (!dayNumber || dayNumber < 1) {
@@ -1488,12 +1489,30 @@ app.put('/api/admin/messages/:day', async (req, res) => {
   }
   if (!(await ensureMongo(res))) return;
 
-  const { title, text, hint, voiceUrl } = req.body;
-  const update: Partial<IMessageOverride> = {};
+  const { title, text, hint, voiceUrl, contentType } = req.body;
+  const update: Partial<IMessageOverride> & Record<string, unknown> = {};
+  if (contentType === 'question' || contentType === 'letter') update.contentType = contentType;
   if (typeof title === 'string') update.title = title.slice(0, 120);
   if (typeof text === 'string') update.text = text.slice(0, 1000);
   if (typeof hint === 'string') update.hint = hint.slice(0, 200);
   if (typeof voiceUrl === 'string') update.voiceUrl = voiceUrl.slice(0, 300);
+
+  if (update.contentType === 'question') {
+    const question = req.body?.question;
+    if (typeof question !== 'string' || !question.trim()) {
+      return res.status(400).json({ error: 'Сұрақ мәтіні бос болмауы керек.' });
+    }
+    const category = typeof req.body?.questionCategory === 'string' ? req.body.questionCategory : '';
+    if (category && !['favorites', 'memory', 'relationship', 'future', 'fun'].includes(category)) {
+      return res.status(400).json({ error: 'Сұрақ категориясы дұрыс емес.' });
+    }
+    update.question = question.slice(0, 1000);
+    update.questionId =
+      (typeof req.body?.questionId === 'string' && req.body.questionId.trim().slice(0, 80)) ||
+      `day-${dayNumber}-question`;
+    update.questionHint = typeof req.body?.questionHint === 'string' ? req.body.questionHint.slice(0, 300) : '';
+    if (category) update.questionCategory = category;
+  }
 
   try {
     const updated = await MessageOverrideModel.findOneAndUpdate(
@@ -1590,6 +1609,7 @@ app.get('/api/admin/stats', async (req, res) => {
 
     const messageOverridesCount = await MessageOverrideModel.countDocuments({});
     const gameScheduleCount = await GameScheduleModel.countDocuments({});
+    const questionDaysCount = await MessageOverrideModel.countDocuments({ contentType: 'question' });
 
     return res.json({
       totalPhotos: photos.length,
@@ -1600,6 +1620,7 @@ app.get('/api/admin/stats', async (req, res) => {
       photosByUploader: byUploader,
       customizedDays: messageOverridesCount,
       scheduledDays: gameScheduleCount,
+      questionDays: questionDaysCount,
     });
   } catch (err) {
     console.error('Error computing admin stats:', err);
@@ -1690,6 +1711,20 @@ async function notifyAdmin(text: string): Promise<void> {
 }
 
 registerFeatureRoutes(app, { connect: connectToMongo, notifyAdmin });
+
+// Daily content (letter / question per day) + question answers.
+registerDailyContentRoutes(app, {
+  connect: connectToMongo,
+  notifyAdmin,
+  partnerMaxDay: async (email) => {
+    try {
+      const doc = await UserProgressModel.findOne({ userId: email }).lean();
+      return (doc?.daysPlayed ?? 0) + 2;
+    } catch {
+      return 0;
+    }
+  },
+});
 
 async function start() {
   await connectToMongo();

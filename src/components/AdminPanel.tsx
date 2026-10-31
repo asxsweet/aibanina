@@ -1,9 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   X, ShieldCheck, BarChart3, BookOpen, Gamepad2, Loader2, Save, RotateCcw,
   Image as ImageIcon, Heart, Video as VideoIcon, Link2, Check, Users, Flame,
   CalendarCheck, AlertCircle, User, Clock, Volume2, RefreshCw, XCircle, CheckCircle2, HelpCircle,
-  Send, Eye, LogOut, Sparkles, Mail, BookHeart, Music, Upload, Gift,
+  Send, Eye, LogOut, Sparkles, Mail, BookHeart, Music, Upload, Gift, MessageCircleHeart,
 } from 'lucide-react';
 import { DAILY_MESSAGES } from '../data/constants';
 import { AdminExtras } from './AdminExtras';
@@ -30,6 +30,13 @@ import {
   updateUserProgress, resetUserProgress,
   MessageOverride, AdminStats,
 } from '../utils/adminUtils';
+import {
+  adminFetchAnswers, adminDeleteAnswer,
+  AdminAnswerRow,
+} from '../utils/dailyQuestionApi';
+import { QUESTION_CATEGORY_LABELS } from '../utils/dailyContent';
+
+const SEEN_ANSWERS_KEY = 'nashe_sozvezdie_seen_answers_v1';
 
 interface AdminPanelProps {
   isOpen: boolean;
@@ -66,7 +73,7 @@ function formatDateTimeKk(timestamp: number): string {
 }
 
 export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 'modal', onPreview, onLogout }) => {
-  const [activeTab, setActiveTab] = useState<'stats' | 'content' | 'schedule' | 'partner' | 'audio' | 'invite' | 'checkup' | 'gallery' | 'extras' | 'story' | 'bonus'>('stats');
+  const [activeTab, setActiveTab] = useState<'stats' | 'content' | 'schedule' | 'partner' | 'audio' | 'invite' | 'checkup' | 'gallery' | 'extras' | 'story' | 'bonus' | 'qanswers'>('stats');
 
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [statsLoading, setStatsLoading] = useState(false);
@@ -75,6 +82,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
   const [overrides, setOverrides] = useState<Record<number, MessageOverride>>({});
   const [contentLoading, setContentLoading] = useState(false);
   const [selectedDay, setSelectedDay] = useState(1);
+  // Day pickers scroll in blocks of 30 (the built-in letter rotation), so
+  // any day past 62 can still be assigned a content type.
+  const [contentBlock, setContentBlock] = useState(0);
   const [formTitle, setFormTitle] = useState('');
   const [formText, setFormText] = useState('');
   const [formHint, setFormHint] = useState('');
@@ -82,6 +92,34 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
   const [contentSaving, setContentSaving] = useState(false);
   const [contentError, setContentError] = useState('');
   const [contentSaved, setContentSaved] = useState(false);
+  // --- contentType: 'letter' | 'question' + question-only fields ---
+  const [formContentType, setFormContentType] = useState<'letter' | 'question'>('letter');
+  const [formQuestion, setFormQuestion] = useState('');
+  const [formQuestionHint, setFormQuestionHint] = useState('');
+  const [formQuestionCategory, setFormQuestionCategory] = useState<string>('relationship');
+  const [typeSwitchTarget, setTypeSwitchTarget] = useState<'letter' | 'question' | null>(null);
+
+  // --- Question answers ("Сұрақ жауаптары" tab) ---
+  const [qaAnswers, setQaAnswers] = useState<AdminAnswerRow[]>([]);
+  const [qaTotal, setQaTotal] = useState(0);
+  const [qaPage, setQaPage] = useState(1);
+  const [qaLoading, setQaLoading] = useState(false);
+  const [qaError, setQaError] = useState('');
+  const [qaDayInput, setQaDayInput] = useState('');
+  const [qaUserInput, setQaUserInput] = useState('');
+  const [qaDayFilter, setQaDayFilter] = useState('');
+  const [qaUserFilter, setQaUserFilter] = useState('');
+  const [qaExpandedId, setQaExpandedId] = useState<string | null>(null);
+  const [qaDeletingId, setQaDeletingId] = useState<string | null>(null);
+  const [qaBusyId, setQaBusyId] = useState<string | null>(null);
+  const [seenAnswerIds, setSeenAnswerIds] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem(SEEN_ANSWERS_KEY);
+      return new Set<string>(raw ? (JSON.parse(raw) as string[]) : []);
+    } catch {
+      return new Set<string>();
+    }
+  });
 
   const [schedule, setSchedule] = useState<Record<number, string>>({});
   const [scheduleLoading, setScheduleLoading] = useState(false);
@@ -451,11 +489,31 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
 
   useEffect(() => {
     const base = DAILY_MESSAGES[(selectedDay - 1) % DAILY_MESSAGES.length];
-    const effective = applyMessageOverride(base, overrides[selectedDay]);
-    setFormTitle(effective.title);
-    setFormText(effective.text);
+    const override = overrides[selectedDay];
+    const effective = applyMessageOverride(base, override);
+    setFormTitle(effective.title || '');
+    setFormText(effective.text || '');
     setFormHint(effective.hint || '');
     setFormVoiceUrl(effective.voiceUrl || '');
+    // A built-in question day (a `question` entry in constants.ts) shows up
+    // as a question too, so the admin sees what she will actually get.
+    if (override?.contentType === 'question') {
+      setFormContentType('question');
+      setFormQuestion(override.question || '');
+      setFormQuestionHint(override.questionHint || '');
+      setFormQuestionCategory(override.questionCategory || 'relationship');
+    } else if (!override && typeof base.question === 'string' && base.question.trim()) {
+      setFormContentType('question');
+      setFormQuestion(base.question);
+      setFormQuestionHint(base.questionHint || '');
+      setFormQuestionCategory(base.questionCategory || 'relationship');
+    } else {
+      setFormContentType('letter');
+      setFormQuestion(override?.question || '');
+      setFormQuestionHint(override?.questionHint || '');
+      setFormQuestionCategory(override?.questionCategory || 'relationship');
+    }
+    setTypeSwitchTarget(null);
     setContentError('');
     setContentSaved(false);
   }, [selectedDay, overrides]);
@@ -463,16 +521,33 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
   const isCustomized = (day: number) => !!overrides[day];
 
   const handleSaveContent = async () => {
+    if (formContentType === 'question' && !formQuestion.trim()) {
+      setContentError('Сұрақ мәтіні бос болмауы керек.');
+      return;
+    }
     setContentSaving(true);
     setContentError('');
     try {
-      const updated = await saveMessageOverride(selectedDay, {
-        title: formTitle,
-        text: formText,
-        hint: formHint,
-        voiceUrl: formVoiceUrl,
-      });
+      // Letter fields and question fields are sent separately, so switching
+      // a day's type never wipes the other type's saved text.
+      const payload =
+        formContentType === 'question'
+          ? {
+              contentType: 'question' as const,
+              question: formQuestion.trim(),
+              questionHint: formQuestionHint.trim(),
+              questionCategory: formQuestionCategory,
+            }
+          : {
+              contentType: 'letter' as const,
+              title: formTitle,
+              text: formText,
+              hint: formHint,
+              voiceUrl: formVoiceUrl,
+            };
+      const updated = await saveMessageOverride(selectedDay, payload);
       setOverrides((prev) => ({ ...prev, [selectedDay]: updated }));
+      setTypeSwitchTarget(null);
       setContentSaved(true);
       setTimeout(() => setContentSaved(false), 1800);
     } catch (err) {
@@ -528,6 +603,77 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
       setScheduleBusyDay(null);
     }
   };
+
+  // --- Question answers (admin) --------------------------------------------
+
+  const persistedSeenIds = useRef(seenAnswerIds?.size ?? 0);
+  persistedSeenIds.current = seenAnswerIds.size;
+
+  const loadQuestionAnswers = async (page: number) => {
+    setQaLoading(true);
+    setQaError('');
+    try {
+      const data = await adminFetchAnswers({
+        page,
+        limit: 50,
+        dayNumber: qaDayFilter ? Number(qaDayFilter) : null,
+        userId: qaUserFilter,
+      });
+      setQaAnswers(data.answers);
+      setQaTotal(data.total);
+      if (data.page > page && page > 1) setQaPage(Math.max(1, Math.ceil(data.total / 50)));
+    } catch (err) {
+      setQaError(err instanceof Error ? err.message : 'Жауаптарды оқу мүмкін болмады.');
+    } finally {
+      setQaLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!isOpen || activeTab !== 'qanswers') return;
+    loadQuestionAnswers(qaPage);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, activeTab, qaPage, qaDayFilter, qaUserFilter]);
+
+  const markAnswersSeen = (ids: string[]) => {
+    if (ids.length === 0) return;
+    setSeenAnswerIds((prev) => {
+      const next = new Set(prev);
+      ids.forEach((id) => next.add(id));
+      try {
+        localStorage.setItem(SEEN_ANSWERS_KEY, JSON.stringify(Array.from(next).slice(-500)));
+      } catch {
+        // non-critical
+      }
+      return next;
+    });
+  };
+
+  const handleApplyQaFilters = () => {
+    setQaDayFilter(qaDayInput.trim());
+    setQaUserFilter(qaUserInput.trim());
+    setQaPage(1);
+  };
+
+  const handleDeleteAnswer = async (id: string) => {
+    setQaBusyId(id);
+    setQaError('');
+    try {
+      await adminDeleteAnswer(id);
+      setQaAnswers((prev) => prev.filter((a) => a.id !== id));
+      setQaTotal((t) => Math.max(0, t - 1));
+      setQaDeletingId(null);
+    } catch (err) {
+      setQaError(err instanceof Error ? err.message : 'Жою мүмкін болмады.');
+    } finally {
+      setQaBusyId(null);
+    }
+  };
+
+  const qaUnseen = useMemo(
+    () => qaAnswers.filter((a) => !seenAnswerIds.has(a.id)).length,
+    [qaAnswers, seenAnswerIds]
+  );
 
   const uploaderEntries = useMemo(
     () =>
@@ -657,17 +803,25 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
   const checkupRows = useMemo(() => {
     return Array.from({ length: DAILY_MESSAGES.length }, (_, i) => i + 1).map((day) => {
       const base = DAILY_MESSAGES[(day - 1) % DAILY_MESSAGES.length];
-      const effective = applyMessageOverride(base, overrides[day]);
+      const override = overrides[day];
+      const effective = applyMessageOverride(base, override);
       const issues: string[] = [];
-      if (!effective.title?.trim()) issues.push('Атауы бос');
-      if (!effective.text?.trim()) issues.push('Мәтіні бос');
+      // Question days (admin-set or built-in via constants.ts) don't need a
+      // letter title/text — they render DailyQuestionModal instead.
+      const isQuestionDay =
+        override?.contentType === 'question' ||
+        (!override && typeof base.question === 'string' && !!base.question.trim());
+      if (!isQuestionDay) {
+        if (!effective.title?.trim()) issues.push('Атауы бос');
+        if (!effective.text?.trim()) issues.push('Мәтіні бос');
+      }
       return {
         day,
         title: effective.title || '',
         text: effective.text || '',
         hint: effective.hint || '',
         voiceUrl: effective.voiceUrl || '',
-        hasOverride: !!overrides[day],
+        hasOverride: !!override,
         issues,
       };
     });
@@ -835,6 +989,20 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
           >
             <Gamepad2 className="w-3.5 h-3.5" />
             Ойын кестесі
+          </button>
+          <button
+            onClick={() => setActiveTab('qanswers')}
+            className={`flex-shrink-0 px-3 py-1.5 rounded-xl font-medium transition flex items-center justify-center gap-1 relative whitespace-nowrap ${
+              activeTab === 'qanswers' ? 'btn-gold font-bold shadow-sm' : 'text-[var(--text-muted)]'
+            }`}
+          >
+            <MessageCircleHeart className="w-3.5 h-3.5" />
+            Сұрақ жауаптары
+            {qaUnseen > 0 && (
+              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">
+                {qaUnseen > 9 ? '9+' : qaUnseen}
+              </span>
+            )}
           </button>
           <button
             onClick={() => setActiveTab('partner')}
@@ -1006,23 +1174,45 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
 
           {activeTab === 'content' && (
             <div>
-              <div className="flex items-center gap-1.5 mb-3 overflow-x-auto no-scrollbar pb-1">
-                {Array.from({ length: DAILY_MESSAGES.length }, (_, i) => i + 1).map((day) => (
-                  <button
-                    key={day}
-                    onClick={() => setSelectedDay(day)}
-                    className={`flex-shrink-0 w-9 h-9 rounded-full text-xs font-semibold border transition flex items-center justify-center relative ${
-                      selectedDay === day
-                        ? 'bg-[var(--accent)] text-[var(--on-accent)] border-[var(--accent)]'
-                        : 'bg-[var(--bg-card)] text-[var(--text-muted)] border-[var(--border)]'
-                    }`}
-                  >
-                    {day}
-                    {isCustomized(day) && (
-                      <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[var(--accent-2)]" />
-                    )}
-                  </button>
-                ))}
+              <div className="flex items-center gap-1.5 mb-3">
+                <button
+                  onClick={() => setContentBlock((b) => Math.max(0, b - 1))}
+                  disabled={contentBlock === 0}
+                  className="flex-shrink-0 w-9 h-9 rounded-full text-xs font-semibold border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-muted)] transition disabled:opacity-30 flex items-center justify-center"
+                  aria-label="Алдыңғы 30 күн"
+                >
+                  ‹
+                </button>
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-1 flex-1">
+                  {Array.from({ length: DAILY_MESSAGES.length }, (_, i) => contentBlock * DAILY_MESSAGES.length + i + 1).map((day) => (
+                    <button
+                      key={day}
+                      onClick={() => setSelectedDay(day)}
+                      className={`flex-shrink-0 w-9 h-9 rounded-full text-xs font-semibold border transition flex items-center justify-center relative ${
+                        selectedDay === day
+                          ? 'bg-[var(--accent)] text-[var(--on-accent)] border-[var(--accent)]'
+                          : 'bg-[var(--bg-card)] text-[var(--text-muted)] border-[var(--border)]'
+                      }`}
+                    >
+                      {day}
+                      {isCustomized(day) && (
+                        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-[var(--accent-2)]" />
+                      )}
+                      {overrides[day]?.contentType === 'question' && (
+                        <span className="absolute -top-1.5 -right-1.5 w-3 h-3 rounded-full bg-[var(--accent)] text-[var(--on-accent)] text-[7px] font-bold flex items-center justify-center">
+                          С
+                        </span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setContentBlock((b) => b + 1)}
+                  className="flex-shrink-0 w-9 h-9 rounded-full text-xs font-semibold border border-[var(--border)] bg-[var(--bg-card)] text-[var(--text-muted)] transition flex items-center justify-center"
+                  aria-label="Келесі 30 күн"
+                >
+                  ›
+                </button>
               </div>
 
               {contentLoading ? (
@@ -1034,6 +1224,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-[var(--accent)]">
                       {selectedDay}-күн {isCustomized(selectedDay) && '· өзгертілген'}
+                      {overrides[selectedDay]?.contentType === 'question' && ' · сұрақ күні'}
                     </span>
                     {isCustomized(selectedDay) && (
                       <button
@@ -1047,50 +1238,171 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
                     )}
                   </div>
 
-                  <label className="block">
-                    <span className="mb-1 block text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Тақырып</span>
-                    <input
-                      type="text"
-                      value={formTitle}
-                      onChange={(e) => setFormTitle(e.target.value)}
-                      maxLength={120}
-                      className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]/50"
-                    />
-                  </label>
+                  {/* Content type — exactly one of the two per day */}
+                  <div>
+                    <span className="mb-1.5 block text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Контент түрі</span>
+                    <div className="grid grid-cols-2 gap-2">
+                      {([['letter', '💌 Күнделікті хат'], ['question', '❓ Мен туралы сұрақ']] as const).map(
+                        ([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() =>
+                              formContentType === value ? setTypeSwitchTarget(null) : setTypeSwitchTarget(value)
+                            }
+                            disabled={contentSaving}
+                            className={`flex items-center gap-2 min-h-[44px] px-3 py-2 rounded-xl border text-xs font-semibold text-left transition ${
+                              formContentType === value
+                                ? 'bg-[var(--accent)]/15 border-[var(--accent)] text-[var(--accent)]'
+                                : 'bg-[var(--bg-card)] border-[var(--border)] text-[var(--text-muted)] hover:bg-[var(--bg-soft)]'
+                            }`}
+                          >
+                            <span
+                              className={`w-3.5 h-3.5 rounded-full border flex-shrink-0 flex items-center justify-center ${
+                                formContentType === value ? 'border-[var(--accent)]' : 'border-[var(--text-faint)]'
+                              }`}
+                            >
+                              {formContentType === value && <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />}
+                            </span>
+                            {label}
+                          </button>
+                        )
+                      )}
+                    </div>
+                  </div>
 
-                  <label className="block">
-                    <span className="mb-1 block text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Хабарлама мәтіні</span>
-                    <textarea
-                      value={formText}
-                      onChange={(e) => setFormText(e.target.value)}
-                      maxLength={1000}
-                      rows={4}
-                      className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text)] outline-none resize-none focus:border-[var(--accent)]/50"
-                    />
-                  </label>
+                  {/* Type-switch confirmation */}
+                  {typeSwitchTarget && (
+                    <div className="rounded-xl border border-amber-400/40 bg-amber-400/10 px-3 py-2.5 space-y-2">
+                      <p className="text-xs text-amber-700 leading-snug">
+                        Бұл күннің контент түрін өзгерткіңіз келе ме?
+                        <br />
+                        <span className="opacity-80">Бұрын сақталған жауаптар автоматты түрде өшірілмейді.</span>
+                      </p>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormContentType(typeSwitchTarget);
+                            setTypeSwitchTarget(null);
+                            setContentError('');
+                          }}
+                          className="min-h-[44px] flex-1 rounded-xl bg-amber-500 text-white text-xs font-bold"
+                        >
+                          Иә, өзгерту
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTypeSwitchTarget(null)}
+                          className="min-h-[44px] flex-1 rounded-xl border border-[var(--border)] bg-[var(--bg-card)] text-xs font-semibold text-[var(--text-secondary)]"
+                        >
+                          Бас тарту
+                        </button>
+                      </div>
+                    </div>
+                  )}
 
-                  <label className="block">
-                    <span className="mb-1 block text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Кеңес (hint)</span>
-                    <input
-                      type="text"
-                      value={formHint}
-                      onChange={(e) => setFormHint(e.target.value)}
-                      maxLength={200}
-                      className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]/50"
-                    />
-                  </label>
+                  {formContentType === 'letter' && (
+                    <div className="space-y-3">
+                      <label className="block">
+                        <span className="mb-1 block text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Тақырып</span>
+                        <input
+                          type="text"
+                          value={formTitle}
+                          onChange={(e) => setFormTitle(e.target.value)}
+                          maxLength={120}
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]/50"
+                        />
+                      </label>
 
-                  <label className="block">
-                    <span className="mb-1 block text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Дауыс файлы (URL, міндетті емес)</span>
-                    <input
-                      type="text"
-                      value={formVoiceUrl}
-                      onChange={(e) => setFormVoiceUrl(e.target.value)}
-                      placeholder="/voice/day-07.mp3"
-                      maxLength={300}
-                      className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-faint)] outline-none focus:border-[var(--accent)]/50"
-                    />
-                  </label>
+                      <label className="block">
+                        <span className="mb-1 block text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Хабарлама мәтіні</span>
+                        <textarea
+                          value={formText}
+                          onChange={(e) => setFormText(e.target.value)}
+                          maxLength={1000}
+                          rows={4}
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text)] outline-none resize-none focus:border-[var(--accent)]/50"
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1 block text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Кеңес (hint)</span>
+                        <input
+                          type="text"
+                          value={formHint}
+                          onChange={(e) => setFormHint(e.target.value)}
+                          maxLength={200}
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]/50"
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1 block text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Дауыс файлы (URL, міндетті емес)</span>
+                        <input
+                          type="text"
+                          value={formVoiceUrl}
+                          onChange={(e) => setFormVoiceUrl(e.target.value)}
+                          placeholder="/voice/day-07.mp3"
+                          maxLength={300}
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-faint)] outline-none focus:border-[var(--accent)]/50"
+                        />
+                      </label>
+                    </div>
+                  )}
+
+                  {formContentType === 'question' && (
+                    <div className="space-y-3">
+                      <label className="block">
+                        <span className="mb-1 block text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Сұрақ</span>
+                        <textarea
+                          value={formQuestion}
+                          onChange={(e) => setFormQuestion(e.target.value)}
+                          maxLength={1000}
+                          rows={3}
+                          placeholder="Менің қандай қасиетім саған көбірек ұнайды?"
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-faint)] outline-none resize-none focus:border-[var(--accent)]/50"
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1 block text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Сұраққа арналған ишара</span>
+                        <input
+                          type="text"
+                          value={formQuestionHint}
+                          onChange={(e) => setFormQuestionHint(e.target.value)}
+                          maxLength={300}
+                          placeholder="Ойыңа бірінші келген жауапты жаз"
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text)] placeholder:text-[var(--text-faint)] outline-none focus:border-[var(--accent)]/50"
+                        />
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1 block text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Категория</span>
+                        <select
+                          value={formQuestionCategory}
+                          onChange={(e) => setFormQuestionCategory(e.target.value)}
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg-card)] px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-[var(--accent)]/50"
+                        >
+                          <option value="favorites">Таңдаулылар</option>
+                          <option value="memory">Естеліктер</option>
+                          <option value="relationship">Қатынас</option>
+                          <option value="future">Болашақ</option>
+                          <option value="fun">Қызық</option>
+                        </select>
+                      </label>
+
+                      <label className="block">
+                        <span className="mb-1 block text-[10px] uppercase tracking-wide text-[var(--text-muted)]">Сұрақ идентификаторы (бос — автоматты)</span>
+                        <input
+                          type="text"
+                          value={overrides[selectedDay]?.questionId || ''}
+                          readOnly
+                          className="w-full rounded-xl border border-[var(--border)] bg-[var(--bg-soft)] px-3 py-2 text-sm text-[var(--text-faint)] outline-none"
+                        />
+                      </label>
+                    </div>
+                  )}
 
                   {contentError && (
                     <div className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-xs text-rose-500">
@@ -1110,9 +1422,192 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
                     ) : (
                       <Save className="w-3.5 h-3.5" />
                     )}
-                    {contentSaving ? 'Сақталуда…' : contentSaved ? 'Сақталды' : 'Сақтау'}
+                    {contentSaving ? 'Сақталуда…' : contentSaved ? 'Сақталды' : formContentType === 'question' ? 'Сұрақ ретінде сақтау' : 'Хат ретінде сақтау'}
                   </button>
                 </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'qanswers' && (
+            <div className="space-y-3">
+              {/* Filters: day + user, applied on demand */}
+              <div className="p-3 rounded-2xl bg-[var(--bg-card)] border border-[var(--border)] space-y-2">
+                <div className="grid grid-cols-2 gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    value={qaDayInput}
+                    onChange={(e) => setQaDayInput(e.target.value)}
+                    placeholder="Күн нөмірі"
+                    className="rounded-xl border border-[var(--border)] bg-[var(--bg-soft)] px-3 py-2 text-xs text-[var(--text)] outline-none focus:border-[var(--accent)]/50"
+                  />
+                  <input
+                    type="text"
+                    value={qaUserInput}
+                    onChange={(e) => setQaUserInput(e.target.value)}
+                    placeholder="Пайдаланушы (email)"
+                    className="rounded-xl border border-[var(--border)] bg-[var(--bg-soft)] px-3 py-2 text-xs text-[var(--text)] outline-none focus:border-[var(--accent)]/50"
+                  />
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleApplyQaFilters}
+                    className="flex-1 min-h-[44px] rounded-xl btn-gold text-xs font-bold flex items-center justify-center gap-1.5"
+                  >
+                    Іздеу
+                  </button>
+                  {(qaDayFilter || qaUserFilter) && (
+                    <button
+                      onClick={() => {
+                        setQaDayInput('');
+                        setQaUserInput('');
+                        setQaDayFilter('');
+                        setQaUserFilter('');
+                        setQaPage(1);
+                      }}
+                      className="flex-1 min-h-[44px] rounded-xl border border-[var(--border)] bg-[var(--bg-card)] text-xs font-semibold text-[var(--text-secondary)] flex items-center justify-center gap-1"
+                    >
+                      <RotateCcw className="w-3 h-3" />
+                      Тазалау
+                    </button>
+                  )}
+                  {qaAnswers.some((a) => !seenAnswerIds.has(a.id)) && (
+                    <button
+                      onClick={() => markAnswersSeen(qaAnswers.map((a) => a.id))}
+                      className="flex-1 min-h-[44px] rounded-xl border border-[var(--accent-2)]/40 text-[var(--accent-2-dark)] text-xs font-semibold flex items-center justify-center"
+                    >
+                      <Check className="w-3 h-3" />
+                      Жаңаларды көрілген деп белгілеу
+                    </button>
+                  )}
+                </div>
+                <p className="text-[10px] text-[var(--text-faint)]">Барлығы: {qaTotal}</p>
+              </div>
+
+              {qaLoading ? (
+                <div className="flex flex-col items-center justify-center py-10 text-[var(--text-faint)]">
+                  <Loader2 className="w-5 h-5 animate-spin mb-2" />
+                  <span className="text-xs">Жүктелуде…</span>
+                </div>
+              ) : qaError ? (
+                <div className="rounded-2xl border border-rose-400/30 bg-rose-400/10 px-3 py-2 text-xs text-rose-500">
+                  {qaError}
+                </div>
+              ) : qaAnswers.length === 0 ? (
+                <div className="text-center py-10 text-xs text-[var(--text-faint)] italic">
+                  Әзірге ешкім сұраққа жауап берген жоқ.
+                </div>
+              ) : (
+                <>
+                  {qaAnswers.map((a) => {
+                    const isNew = !seenAnswerIds.has(a.id);
+                    const expanded = qaExpandedId === a.id || !!qaDeletingId || a.answer.length <= 140;
+                    return (
+                      <div
+                        key={a.id}
+                        className={`p-3.5 rounded-2xl bg-[var(--bg-card)] border transition ${
+                          isNew && !(a.id === qaDeletingId || a.answer.length <= 140)
+                            ? 'border-[var(--accent-2)]/50 ring-1 ring-[var(--accent-2)]/30'
+                            : 'border-[var(--border)]'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between gap-2 mb-1.5">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <User className="w-3.5 h-3.5 text-[var(--accent)] flex-shrink-0" />
+                            <span className="text-xs font-semibold text-[var(--text)] truncate">
+                              {a.userName || a.userId}
+                            </span>
+                            {isNew && (
+                              <span className="flex-shrink-0 px-1.5 py-0.5 rounded-full bg-[var(--accent-2)] text-[var(--on-accent)] text-[8px] font-bold uppercase">
+                                Жаңа
+                              </span>
+                            )}
+                          </div>
+                          <span className="flex-shrink-0 text-[10px] text-[var(--text-faint)] tabular-nums">
+                            {formatDateTimeKk(a.updatedAt || a.createdAt)}
+                          </span>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-1.5 mb-1.5">
+                          <span className="px-2 py-0.5 rounded-full bg-[var(--accent)]/10 text-[var(--accent)] text-[10px] font-semibold">
+                            {a.dayNumber}-күн
+                          </span>
+                          <span className="text-[10px] text-[var(--text-faint)] truncate max-w-full">{a.userId}</span>
+                        </div>
+
+                        <p className="text-xs text-[var(--text-secondary)] leading-snug mb-1">{a.question}</p>
+                        <p
+                          className={`text-xs text-[var(--text)] leading-relaxed whitespace-pre-wrap break-words ${
+                            expanded ? '' : 'line-clamp-3'
+                          }`}
+                        >
+                          {a.answer}
+                        </p>
+
+                        <div className="flex items-center gap-2 mt-2 pt-2 border-t border-[var(--border)]">
+                          {a.answer.length > 140 && !qaDeletingId && (
+                            <button
+                              onClick={() => setQaExpandedId(expanded ? null : a.id)}
+                              className="text-[11px] font-semibold text-[var(--accent)] hover:underline"
+                            >
+                              {expanded ? 'Жабыру' : 'Толық жауапты ашу'}
+                            </button>
+                          )}
+                          <div className="flex-1" />
+                          {qaDeletingId === a.id ? (
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[10px] text-rose-500">Жойылсын ба?</span>
+                              <button
+                                onClick={() => handleDeleteAnswer(a.id)}
+                                disabled={qaBusyId === a.id}
+                                className="px-3 py-1.5 rounded-full bg-rose-500 text-white text-[11px] font-bold disabled:opacity-60"
+                              >
+                                {qaBusyId === a.id ? <Loader2 className="w-3 h-3 animate-spin" /> : 'Иә'}
+                              </button>
+                              <button
+                                onClick={() => setQaDeletingId(null)}
+                                className="px-3 py-1.5 rounded-full border border-[var(--border)] text-[11px] font-semibold text-[var(--text-secondary)]"
+                              >
+                                Жоқ
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              onClick={() => setQaDeletingId(a.id)}
+                              className="p-1.5 rounded-full text-[var(--text-faint)] hover:text-rose-500 transition"
+                              aria-label="Жауапты жою"
+                            >
+                              <XCircle className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+
+                  {qaTotal > 50 && (
+                    <div className="flex items-center justify-between pt-1">
+                      <button
+                        onClick={() => setQaPage((p) => Math.max(1, p - 1))}
+                        disabled={qaPage <= 1}
+                        className="min-h-[44px] px-4 rounded-xl border border-[var(--border)] bg-[var(--bg-card)] text-xs font-semibold text-[var(--text-secondary)] disabled:opacity-40"
+                      >
+                        ‹ Алдыңғы бет
+                      </button>
+                      <span className="text-[10px] text-[var(--text-faint)]">
+                        {qaPage} / {Math.ceil(qaTotal / 50)}
+                      </span>
+                      <button
+                        onClick={() => setQaPage((p) => (p < Math.ceil(qaTotal / 50) ? p + 1 : p))}
+                        disabled={qaPage >= Math.ceil(qaTotal / 50)}
+                        className="min-h-[44px] px-4 rounded-xl border border-[var(--border)] bg-[var(--bg-card)] text-xs font-semibold text-[var(--text-secondary)] disabled:opacity-40"
+                      >
+                        Кейінгісі ›
+                      </button>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           )}

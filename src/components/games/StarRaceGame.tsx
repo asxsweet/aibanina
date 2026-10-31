@@ -1,4 +1,4 @@
-// Жұлдызды жарыс (star race) — three lanes, one SVG ship, and the partner's
+﻿// Жұлдызды жарыс (star race) — three lanes, one SVG ship, and the partner's
 // best score chasing you as a ghost marker on the side track.
 //
 // Everything runs on one RAF loop with delta time and a pooled DOM list;
@@ -29,6 +29,7 @@ const GAME_ID: GameId = 'star-race';
 
 const LANES = 3;
 const ITEM_POOL = 10;
+const PICKUP_SIZE: Record<string, number> = { star: 34, gold: 34, shield: 34, magnet: 30, x2: 30, rock: 34 };
 // The spawn logic needs pre-allocated inactive slots — otherwise items.current
 // starts empty, findIndex() returns -1 and nothing ever falls.
 const freshPool = (): Racer[] => Array.from({ length: ITEM_POOL }, () => ({ id: 0, type: 'star', lane: 1, yPx: 0, speed: 0, active: false }));
@@ -125,6 +126,8 @@ export const StarRaceGame: React.FC<GameComponentProps> = ({
   const fieldRef = useRef<HTMLDivElement>(null);
   const itemEls = useRef<(HTMLDivElement | null)[]>([]);
   const shipRef = useRef<HTMLDivElement>(null);
+  const shipInnerRef = useRef<HTMLDivElement>(null);
+  const tiltTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const items = useRef<Racer[]>([]);
   const laneTargetRef = useRef(1);
   const laneRef = useRef(1);
@@ -185,6 +188,19 @@ export const StarRaceGame: React.FC<GameComponentProps> = ({
     }, []),
     onRoundEnd,
   });
+
+  // Кеме жарқ етеді: жиналғанда — алтын, соққы жегенде — қызыл
+  const flashShip = (kind: 'good' | 'hit'): void => {
+    const el = shipInnerRef.current;
+    if (!el) return;
+    el.style.filter = kind === 'good' ? 'drop-shadow(0 0 10px #F4B942) brightness(1.25)' : 'drop-shadow(0 0 10px #E5484D) brightness(1.2)';
+    window.setTimeout(() => {
+      // қалқан бар болса, оның жарығы қайта қосылады
+      if (shipInnerRef.current) {
+        shipInnerRef.current.style.filter = shieldUntilRef.current ? 'drop-shadow(0 0 10px rgba(140,214,255,.9))' : '';
+      }
+    }, 170);
+  };
 
   const setScoreState = (): void => {
     setScore(scoreRef.current);
@@ -284,6 +300,7 @@ export const StarRaceGame: React.FC<GameComponentProps> = ({
               shieldUntilRef.current = 0;
               setShielded(false);
               invulnUntilRef.current = now + 1000;
+              flashShip('good');
               gameAudio.play('shield');
               buzz(25);
               setShake((s) => s + 1);
@@ -292,6 +309,7 @@ export const StarRaceGame: React.FC<GameComponentProps> = ({
               invulnUntilRef.current = now + 1000;
               setLives(livesRef.current);
               setShake((s) => s + 1);
+              flashShip('hit');
               gameAudio.play('error');
               buzz([30, 50, 30]);
               if (livesRef.current === 0) {
@@ -303,6 +321,7 @@ export const StarRaceGame: React.FC<GameComponentProps> = ({
             const mult = now < boostUntilRef.current ? 2 : 1;
             scoreRef.current += BASE_POINTS[it.type] * mult;
             setScoreState();
+            flashShip('good');
             gameAudio.play(it.type === 'gold' ? 'gold' : it.type === 'star' ? 'point' : 'shield');
             buzz(8);
             if (it.type === 'shield') {
@@ -338,7 +357,7 @@ export const StarRaceGame: React.FC<GameComponentProps> = ({
         }
         el.dataset.on = '1';
         el.style.opacity = '1';
-        el.style.transform = `translate3d(${laneX(it.lane) - 17}px, ${it.yPx}px, 0)`;
+        el.style.transform = `translate3d(${laneX(it.lane) - (PICKUP_SIZE[it.type] ?? 34) / 2}px, ${it.yPx}px, 0)`;
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -351,6 +370,15 @@ export const StarRaceGame: React.FC<GameComponentProps> = ({
   const askLane = useCallback((next: number) => {
     const clamped = Math.max(0, Math.min(LANES - 1, next));
     if (clamped === laneTargetRef.current) return;
+    // жолақ ауысқанда кеме бұрылып, қайта түзеледі
+    const dir = clamped > laneTargetRef.current ? 1 : -1;
+    if (shipInnerRef.current) {
+      shipInnerRef.current.style.transform = `rotate(${dir * 20}deg) scale(0.92)`;
+      if (tiltTimerRef.current) clearTimeout(tiltTimerRef.current);
+      tiltTimerRef.current = setTimeout(() => {
+        if (shipInnerRef.current) shipInnerRef.current.style.transform = 'rotate(0deg) scale(0.92)';
+      }, 170);
+    }
     laneTargetRef.current = clamped;
     laneRef.current = clamped;
     setLane(clamped);
@@ -402,27 +430,35 @@ export const StarRaceGame: React.FC<GameComponentProps> = ({
 
   // ── glyph chooser ──────────────────────────────────────────────────────
   const itemGlyph = useCallback((type: PickupType) => {
+    let glyph: React.ReactNode;
     switch (type) {
       case 'gold':
-        return <StarGlyph size={34} color="#F4B942" />;
+        glyph = <StarGlyph size={34} color="#F4B942" />;
+        break;
       case 'shield':
-        return <ShieldBubbleGlyph size={34} />;
+        glyph = <ShieldBubbleGlyph size={34} />;
+        break;
       case 'magnet':
-        return <MagnetGlyph size={30} />;
+        glyph = <MagnetGlyph size={30} />;
+        break;
       case 'x2':
-        return (
+        glyph = (
           <span
-            className="inline-flex h-[30px] w-[30px] items-center justify-center rounded-full bg-[var(--accent)] text-[11px] font-black text-[var(--on-accent)] shadow-[0_0_14px_var(--accent-glow)]"
+            className="inline-flex h-[30px] w-[30px] items-center justify-center rounded-full bg-[var(--accent)] text-[11px] font-black text-[var(--on-accent)] shadow-[0_0_10px_var(--accent-glow)]"
             aria-hidden
           >
             ×2
           </span>
         );
+        break;
       case 'rock':
-        return <AsteroidGlyph size={34} />;
+        glyph = <AsteroidGlyph size={34} />;
+        break;
       default:
-        return <StarGlyph size={34} color="var(--accent)" />;
+        glyph = <StarGlyph size={34} color="var(--accent)" />;
     }
+    // жұлдыздар тербеледі, астероидтар айналады — алаң «тірі» көрінеді
+    return <span className={type === 'rock' ? 'anim-rock-spin' : 'anim-pickup-bob'}>{glyph}</span>;
   }, []);
 
   const steps = useMemo(
@@ -476,8 +512,8 @@ export const StarRaceGame: React.FC<GameComponentProps> = ({
           {[1, 2].map((l) => (
             <div
               key={l}
-              className="absolute inset-y-0 w-px bg-[var(--border)]"
-              style={{ left: `${(l / LANES) * 100}%` }}
+              className="absolute inset-y-0 lane-line"
+              style={{ left: `${(l / LANES) * 100}%`, animationPlayState: shell.phase === 'playing' ? 'running' : 'paused' }}
             />
           ))}
 
@@ -540,20 +576,25 @@ export const StarRaceGame: React.FC<GameComponentProps> = ({
             </span>
           ))}
 
-          {/* the ship — lane glide via CSS transition */}
+          {/* the ship — lane glide via CSS transition.
+              ТҮЗЕТУ: бұрын translate3d(calc(% − 24px)) болатын, ал % кеменің ӨЗ енінің (48px) %-ы еді →
+              кеме экранның сол жақ шетінде тұрып қалатын. Енді left:% + translateX(-50%). */}
           <div
             ref={shipRef}
             className="absolute bottom-3 pointer-events-none will-change-transform"
             style={{
-              transform: `translate3d(calc(${((lane + 0.5) / LANES) * 100}% - 24px), 0, 0)`,
-              transition: 'transform 0.19s cubic-bezier(0.2, 0.9, 0.3, 1.2)',
+              left: `${((lane + 0.5) / LANES) * 100}%`,
+              transform: 'translateX(-50%)',
+              transition: 'left 0.19s cubic-bezier(0.2, 0.9, 0.3, 1.2)',
             }}
           >
             <div
+              ref={shipInnerRef}
               style={{
                 filter: shielded ? 'drop-shadow(0 0 10px rgba(140,214,255,.9))' : undefined,
-                transform: 'rotate(6deg) scale(0.92)',
+                transform: 'rotate(0deg) scale(0.92)',
                 transformOrigin: '50% 80%',
+                transition: 'transform 0.17s ease-out, filter 0.17s ease-out',
               }}
             >
               <ShipGlyph size={48} />

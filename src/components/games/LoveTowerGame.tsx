@@ -1,4 +1,4 @@
-// Махаббат мұнарасы (love tower) — the stacking classic, fully delta-timed.
+﻿// Махаббат мұнарасы (love tower) — the stacking classic, fully delta-timed.
 //
 // The hanging brick glides horizontally (position += speed × deltaTime), a tap
 // drops it, the overlap with the tower top decides the new width, and the
@@ -7,7 +7,7 @@
 // tower and the backdrop drifts ground → clouds → sky. Merê targets per
 // difficulty; the daily task counts `perfects`.
 
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { GameShell } from './shared/GameShell';
 import { useGameShell } from './shared/useGameShell';
 import { BlockGlyph, SparkleGlyph } from './shared/art';
@@ -33,13 +33,22 @@ const PRESETS: Record<DifficultyName, Preset> = {
 const BLOCK_H = 30; // px
 const PERFECT_PCT = 98;
 
+const GROUND = 26; // px — жерден блокқа дейін
+// биік қабаттарда көрінетін жұлдыздар: [left%, top%, size px, delay s]
+const STAR_DOTS: ReadonlyArray<readonly [number, number, number, number]> = [
+  [8, 8, 2, 0], [22, 18, 3, 0.6], [36, 6, 2, 1.1], [52, 14, 3, 0.3], [66, 5, 2, 1.7], [80, 16, 3, 0.9],
+  [90, 7, 2, 1.4], [14, 30, 2, 1.9], [44, 26, 2, 0.2], [72, 30, 3, 1.2], [58, 38, 2, 0.8], [30, 40, 2, 1.5],
+];
+
 interface StackBlock {
+  n: number; // абсолютті қабат нөмірі (0 = іргетас)
   x: number; // % of field
   w: number; // % of field
   perfect: boolean;
 }
 
 interface FallingChunk {
+  n: number; // қай қабат деңгейінде құлайды
   x: number;
   w: number;
   key: number;
@@ -68,6 +77,7 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
   const [chunks, setChunks] = useState<FallingChunk[]>([]);
   const [perfectFlash, setPerfectFlash] = useState(0);
   const [skyStage, setSkyStage] = useState(0); // 0 ground · 1 clouds · 2 sky
+  const [fieldH, setFieldH] = useState(380);
 
   // ── live data (refs) ───────────────────────────────────────────────────
   const fieldRef = useRef<HTMLDivElement>(null);
@@ -144,28 +154,41 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
 
   useRafLoop(shell.phase === 'playing', step);
 
+  // Алаң биіктігін өлшеу — камера мұнараның төбін көрінетін жерде ұстау үшін керек
+  useEffect(() => {
+    const el = fieldRef.current;
+    if (!el || (shell.phase !== 'playing' && shell.phase !== 'paused')) return undefined;
+    const measure = () => setFieldH(el.clientHeight || 380);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [shell.phase]);
+
   // ── the drop ───────────────────────────────────────────────────────────
   const drop = useCallback(() => {
     if (!shell.playingRef.current || endedRef.current) return;
-    const fieldW = fieldRef.current?.clientWidth ?? 340;
     const x = xRef.current;
     const w = widthRef.current;
+    const top = topRef.current;
+    const level = floorsRef.current; // ілулі блоктың қабаты = қонған блок саны
     let overlap: number;
-    if (!topRef.current) {
-      overlap = w; // anywhere is fine for the foundation
+    if (!top) {
+      overlap = w; // іргетас — кез келген жерге түседі
     } else {
-      const left = Math.max(topRef.current.x, x);
-      const right = Math.min(topRef.current.x + topRef.current.w, x + w);
+      const left = Math.max(top.x, x);
+      const right = Math.min(top.x + top.w, x + w);
       overlap = right - left;
     }
     const pctOverlap = (overlap / w) * 100;
 
     if (pctOverlap <= 3) {
-      // cut clean through — tower lost
+      // мұнарадан тыс — бүкіл блок құлайды, ойын біттi
       endedRef.current = true;
       gameAudio.play('miss');
       buzz([40, 60, 40]);
-      setChunks((c) => [...c, { x, w, key: chunkKeyRef.current++ }]);
+      setChunks((cs) => [...cs, { n: level, x, w, key: chunkKeyRef.current++ }]);
       shell.endRound('loss', {
         scoreValue: scoreRef.current,
         metrics: { perfects: perfectsRef.current },
@@ -173,13 +196,15 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
       return;
     }
 
-    const isPerfect = pctOverlap >= PERFECT_PCT;
-    const newX = topRef.current ? Math.max(topRef.current.x, x) : x;
-    const landed: StackBlock = { x: newX, w: overlap, perfect: isPerfect };
+    // Іргетас Perfect болып саналмайды; қалғанында ≥98% — Perfect және блок дәл тураланады
+    const isPerfect = !!top && pctOverlap >= PERFECT_PCT;
+    const landed: StackBlock = isPerfect
+      ? { n: level, x: top!.x, w: top!.w, perfect: true }
+      : { n: level, x: top ? Math.max(top.x, x) : x, w: overlap, perfect: false };
     floorsRef.current += 1;
     topRef.current = landed;
     setFloors(floorsRef.current);
-    setBlocks((prev) => [...prev.slice(-26), landed]); // keep a rolling window
+    setBlocks((prev) => [...prev.slice(-40), landed]);
 
     if (isPerfect) {
       comboRef.current += 1;
@@ -191,17 +216,23 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
       window.setTimeout(() => setPerfectFlash(0), 850);
     } else {
       comboRef.current = 0;
-      scoreRef.current += Math.round(overlap * (100 / w));
+      scoreRef.current += Math.round(pctOverlap);
       gameAudio.play('drop');
       buzz(8);
     }
     setScore(scoreRef.current);
     setCombo(comboRef.current > 1 ? comboRef.current : 0);
 
-    // the shaved-off piece tumbles away
-    if (pctOverlap < 100) {
-      setChunks((c) => [...c.slice(-2), { x, w: w - overlap, key: chunkKeyRef.current++ }]);
-      window.setTimeout(() => setChunks((c) => c.slice(1)), 900);
+    // кесілген бөлшек ТҮСКЕН блоктың дәл сол жағынан құлайды
+    if (top && !isPerfect && pctOverlap < 100) {
+      const cutLeft = x < top.x;
+      const piece = cutLeft
+        ? { x, w: top.x - x }
+        : { x: top.x + top.w, w: x + w - (top.x + top.w) };
+      if (piece.w > 0.3) {
+        setChunks((cs) => [...cs.slice(-2), { n: level, x: piece.x, w: piece.w, key: chunkKeyRef.current++ }]);
+        window.setTimeout(() => setChunks((cs) => cs.slice(1)), 900);
+      }
     }
 
     if (floorsRef.current >= presetRef.current.targetFloors && !endedRef.current) {
@@ -213,21 +244,35 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
       return;
     }
 
-    // reset the hanging block for the next floor
+    // келесі қабат үшін ілулі блокты қайта қою
     xRef.current = 2;
     dirRef.current = 1;
-    widthRef.current = overlap;
-    setBlockW(overlap);
+    widthRef.current = landed.w;
+    setBlockW(landed.w);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shell.playingRef, shell.endRound, paint]);
 
+  // Ноутбук: Space / Enter / ↓ — блокты тастау (алаңға фокус қою қажет емес)
+  useEffect(() => {
+    if (shell.phase !== 'playing') return undefined;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.repeat) return;
+      if (e.code !== 'Space' && e.key !== 'Enter' && e.key !== 'ArrowDown') return;
+      const t = e.target as HTMLElement | null;
+      if (t && t.closest('button, a, input, select, textarea') && t !== fieldRef.current) return;
+      e.preventDefault();
+      drop();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [shell.phase, drop]);
+
   // ── render ─────────────────────────────────────────────────────────────
-  const floorsNow = floorsRef.current;
-  const cameraY = Math.max(0, floorsNow * BLOCK_H - 260);
-  const skyFor = useMemo(
-    () => (floorsNow >= 9 ? 2 : floorsNow >= 4 ? 1 : 0),
-    [floorsNow]
-  );
+  // ТҮЗЕТУ: камера бұрын translateY(-…) болатын — мұнараны ЖОҒАРЫ итеріп, төбесі экраннан шығып кететін.
+  // Енді мұнара өскен сайын ТӨМЕН түседі: ілулі блоктың төбесі әрқашан алаңның ~60% биіктігінде тұрады.
+  const hangTop = GROUND + (floors + 1) * BLOCK_H; // ілулі блоктың жоғарғы шеті (төменнен, px)
+  const cameraY = Math.max(0, hangTop - fieldH * 0.6);
+  const skyFor = useMemo(() => (floors >= 9 ? 2 : floors >= 4 ? 1 : 0), [floors]);
   const sky = Math.max(skyFor, skyStage);
 
   const steps = useMemo(
@@ -274,15 +319,12 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
       <div
         ref={fieldRef}
         onClick={drop}
-        onKeyDown={(e) => {
-          if (e.key === ' ' || e.key === 'Enter') drop();
-        }}
         role="button"
         tabIndex={0}
         className="absolute inset-0 overflow-hidden game-field cursor-pointer outline-none"
         style={{ touchAction: 'none' }}
       >
-        {/* backdrop layers: ground → clouds → sky */}
+        {/* backdrop layers: ground → clouds → sky (параллакс: камерамен баяу жылжиды) */}
         <div
           className="absolute inset-0 pointer-events-none transition-opacity duration-1000"
           style={{
@@ -292,7 +334,7 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
         />
         <div
           className="absolute inset-0 pointer-events-none transition-opacity duration-1000"
-          style={{ opacity: cloudOp }}
+          style={{ opacity: cloudOp, transform: `translateY(${cameraY * 0.3}px)`, transition: 'opacity 1s, transform 0.5s ease-out' }}
         >
           {[0, 1, 2].map((i) => (
             <div
@@ -307,68 +349,81 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
             />
           ))}
         </div>
+        {sky >= 2 && (
+          <div className="absolute inset-0 pointer-events-none" style={{ transform: `translateY(${cameraY * 0.15}px)` }}>
+            {STAR_DOTS.map((s, i) => (
+              <span
+                key={i}
+                className="absolute rounded-full bg-white anim-twinkle-star"
+                style={{ left: `${s[0]}%`, top: `${s[1]}%`, width: s[2], height: s[2], animationDelay: `${s[3]}s` }}
+              />
+            ))}
+          </div>
+        )}
 
-        {/* floored stack + hanging block, camera-lifted */}
+        {/* қонған мұнара + ілулі блок + құлаған бөлшек — бәрі бір камерада */}
         <div
           className="absolute left-0 right-0 will-change-transform"
           style={{
-            bottom: 26,
-            transform: `translateY(-${cameraY}px)`,
+            bottom: GROUND,
+            transform: `translateY(${cameraY}px)`,
             transition: 'transform 0.5s ease-out',
           }}
         >
           {/* the riding landing pad */}
           <div className="absolute left-[14%] right-[14%] h-[6px] rounded-full bg-[var(--text-muted)]/30 -bottom-[8px]" />
 
-          {/* landed blocks (rolling window) */}
-          {blocks.map((b, i) => (
+          {/* landed blocks (абсолютті қабат нөмірі бойынша) */}
+          {blocks.map((b) => (
             <div
-              key={i}
+              key={b.n}
               className="absolute left-0 will-change-transform"
               style={{
-                bottom: i * BLOCK_H,
+                bottom: b.n * BLOCK_H,
                 width: `${b.w}%`,
                 transform: `translateX(${(b.x / 100) * (fieldRef.current?.clientWidth ?? 340)}px)`,
               }}
             >
-              <BlockGlyph width="100%" height={BLOCK_H - 4} perfect={b.perfect} />
+              <div className="relative anim-block-land">
+                <BlockGlyph width="100%" height={BLOCK_H - 4} perfect={b.perfect} />
+                {b.perfect && (
+                  <span className="absolute -inset-1 rounded-md border-2 border-[var(--accent)] anim-perfect-ring pointer-events-none" />
+                )}
+              </div>
             </div>
           ))}
 
-          {/* the hanging, gliding block */}
+          {/* the hanging, gliding block (жіппен ілінген) */}
           <div
             className="absolute left-0 will-change-transform"
-            style={{ bottom: blocks.length * BLOCK_H, width: `${blockW}%` }}
+            style={{ bottom: floors * BLOCK_H, width: `${blockW}%` }}
           >
             <div ref={sliderRef} className="relative">
+              <span
+                className="absolute left-1/2 bottom-full w-px -translate-x-1/2 bg-[var(--text-muted)]/45 pointer-events-none"
+                style={{ height: 900 }}
+              />
               <BlockGlyph width="100%" height={BLOCK_H - 4} />
             </div>
           </div>
-        </div>
 
-        {/* falling cut chunks */}
-        {chunks.map((c) => (
-          <div
-            key={c.key}
-            className="absolute left-0 pointer-events-none"
-            style={{
-              width: `${c.w}%`,
-              transform: `translateX(${(c.x / 100) * (fieldRef.current?.clientWidth ?? 340)}px)`,
-              bottom: 26 + blocks.length * BLOCK_H,
-            }}
-          >
+          {/* falling cut chunks */}
+          {chunks.map((ch) => (
             <div
-              className="anim-chunk-fall"
+              key={ch.key}
+              className="absolute left-0 pointer-events-none"
               style={{
-                width: '100%',
-                opacity: 0.85,
-                transformOrigin: '50% 0',
+                width: `${ch.w}%`,
+                transform: `translateX(${(ch.x / 100) * (fieldRef.current?.clientWidth ?? 340)}px)`,
+                bottom: ch.n * BLOCK_H,
               }}
             >
-              <BlockGlyph width="100%" height={BLOCK_H - 4} className="opacity-90" />
+              <div className="anim-chunk-fall" style={{ width: '100%', opacity: 0.85, transformOrigin: '50% 0' }}>
+                <BlockGlyph width="100%" height={BLOCK_H - 4} className="opacity-90" />
+              </div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
 
         {/* perfect drop flash */}
         {perfectFlash > 0 && (

@@ -1,4 +1,4 @@
-// Жұбын тап (memory) — a 3D-flip pairs game.
+﻿// Жұбын тап (memory) — a 3D-flip pairs game.
 //
 // Faces come from the couple's own gallery photos when possible (preloaded
 // once, at the idle screen) — the shared SVG symbols fill whatever pairs the
@@ -30,7 +30,7 @@ const PRESETS: Record<DifficultyName, Preset> = {
   hard: { pairs: 10, cols: 5, limitMs: 130_000 }, // 5×4
 };
 
-type CardState = 'hidden' | 'open' | 'matched';
+type CardState = 'hidden' | 'open' | 'matched' | 'wrong';
 
 interface CardFace {
   type: 'photo' | 'symbol';
@@ -134,6 +134,7 @@ export const MemoryGame: React.FC<GameComponentProps> = ({
   const pauseStartRef = useRef(0);
   const lastSecRef = useRef(Math.round(preset.limitMs / 1000));
   const endedRef = useRef(false);
+  const roundTokenRef = useRef(0); // жаңа раундта ескі таймерлер жұмыс істемесін
   const presetRef = useRef(preset);
   presetRef.current = preset;
 
@@ -144,6 +145,7 @@ export const MemoryGame: React.FC<GameComponentProps> = ({
     playedToday,
     onBeforeStart: useCallback(() => {
       const p = presetRef.current;
+      roundTokenRef.current += 1;
       lockedRef.current = false;
       firstPickIdRef.current = null;
       scoreRef.current = 0;
@@ -212,7 +214,8 @@ export const MemoryGame: React.FC<GameComponentProps> = ({
     (id: number) => {
       if (lockedRef.current || !shell.playingRef.current || endedRef.current) return;
       const card = cards[id];
-      if (!card || card.state === 'matched' || card.state === 'open') return;
+      if (!card || card.state === 'matched' || card.state === 'open' || card.state === 'wrong') return;
+      const token = roundTokenRef.current;
       gameAudio.play('flip');
       buzz(8);
 
@@ -236,6 +239,7 @@ export const MemoryGame: React.FC<GameComponentProps> = ({
       );
 
       setTimeout(() => {
+        if (token !== roundTokenRef.current) return;
         if (isPair) {
           // checking → matched
           streakRef.current += 1;
@@ -243,6 +247,7 @@ export const MemoryGame: React.FC<GameComponentProps> = ({
           const points = 60 + (streakRef.current - 1) * 15;
           scoreRef.current += points;
           matchedRef.current += 1;
+          setMatchedCount(matchedRef.current); // HUD: табылған жұп саны
           setCombo(streakRef.current > 1 ? streakRef.current : 0);
           gameAudio.play(streakRef.current >= 3 ? 'combo' : 'point', { combo: streakRef.current });
           buzz(12);
@@ -261,20 +266,29 @@ export const MemoryGame: React.FC<GameComponentProps> = ({
             });
           }
         } else {
-          // checking → hidden again
+          // checking → wrong (карталар сілкінеді) → hidden again
           streakRef.current = 0;
           setCombo(0);
           gameAudio.play('miss');
           buzz([12, 30, 12]);
-          setShake((s) => s + 1);
           setCards((cur) =>
             cur.map((c) =>
-              c.id === firstId || c.id === id ? { ...c, state: 'hidden' as CardState } : c
+              c.id === firstId || c.id === id ? { ...c, state: 'wrong' as CardState } : c
             )
           );
+          setTimeout(() => {
+            if (token !== roundTokenRef.current) return;
+            setCards((cur) =>
+              cur.map((c) =>
+                c.id === firstId || c.id === id ? { ...c, state: 'hidden' as CardState } : c
+              )
+            );
+            lockedRef.current = false;
+          }, 420);
+          return;
         }
         lockedRef.current = false;
-      }, isPair ? 380 : 700);
+      }, isPair ? 380 : 520);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [cards, shell.playingRef, shell.endRound, elapsedMs]
@@ -352,7 +366,7 @@ export const MemoryGame: React.FC<GameComponentProps> = ({
               aria-label={card.state === 'matched' ? 'Табылған жұп' : 'Жабық карта'}
               className={`flip-card aspect-square ${card.state !== 'hidden' ? 'is-flipped' : ''} ${
                 card.state === 'matched' ? 'is-matched' : ''
-              }`}
+              } ${card.state === 'wrong' ? 'is-wrong' : ''}`}
             >
               <span className="flip-inner">
                 {/* closed side */}

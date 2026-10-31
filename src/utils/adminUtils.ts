@@ -4,10 +4,15 @@ const API_BASE = (import.meta.env.VITE_API_URL || '').replace(/\/$/, '');
 
 export interface MessageOverride {
   dayNumber: number;
+  contentType?: 'letter' | 'question';
   title?: string;
   text?: string;
   hint?: string;
   voiceUrl?: string;
+  questionId?: string;
+  question?: string;
+  questionHint?: string;
+  questionCategory?: string;
 }
 
 export interface GameScheduleEntry {
@@ -49,14 +54,27 @@ export async function fetchMessageOverrides(): Promise<MessageOverride[]> {
 
 export async function saveMessageOverride(
   dayNumber: number,
-  fields: Partial<Pick<MessageOverride, 'title' | 'text' | 'hint' | 'voiceUrl'>>
+  fields: Partial<
+    Pick<
+      MessageOverride,
+      'contentType' | 'title' | 'text' | 'hint' | 'voiceUrl' |
+      'questionId' | 'question' | 'questionHint' | 'questionCategory'
+    >
+  >
 ): Promise<MessageOverride> {
   const res = await fetch(`${API_BASE}/api/admin/messages/${dayNumber}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(fields),
   });
-  if (!res.ok) throw new Error('Сақтау мүмкін болмады.');
+  if (!res.ok) {
+    let message = 'Сақтау мүмкін болмады.';
+    try {
+      const data = await res.json();
+      if (data?.error) message = data.error;
+    } catch { /* non-JSON error body */ }
+    throw new Error(message);
+  }
   const data = await res.json();
   return data.override as MessageOverride;
 }

@@ -1,11 +1,11 @@
-// Жүрек аулау (catch) — hearts fall, the catcher follows the finger.
+﻿// Жүрек аулау (catch) — hearts fall, the catcher follows the finger.
 //
 // Rewrite notes: everything runs on ONE requestAnimationFrame loop with delta
 // time; entities live in refs and paint through transform-only updates.
 // New items: gold (+25), frost (slow-mo), magnet, broken-heart obstacle; a
 // combo multiplier; lives; a time budget per round; three difficulty presets.
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { GameShell } from './shared/GameShell';
 import { useGameShell } from './shared/useGameShell';
 import {
@@ -106,6 +106,8 @@ interface VisualSlot {
   key: number;
 }
 
+const BASKET_W = 64; // себеттің ені, px
+const CATCH_RADIUS = 40; // жүрек орталығы мен себет орталығының арақашықтығы, px
 const POOL = 9;
 const PARTICLE_POOL = 10;
 const FLOAT_POOL = 4;
@@ -144,6 +146,8 @@ export const CatchGame: React.FC<GameComponentProps> = ({
   // ── live game data (refs only) ──────────────────────────────────────────
   const fieldRef = useRef<HTMLDivElement>(null);
   const catcherRef = useRef<HTMLDivElement>(null);
+  const basketInnerRef = useRef<HTMLDivElement>(null);
+  const catcherDispX = useRef(50); // экрандағы (жұмсартылған) орын, %
   const itemEls = useRef<(HTMLDivElement | null)[]>([]);
   const sparkleEls = useRef<(HTMLSpanElement | null)[]>([]);
   const floatEls = useRef<(HTMLSpanElement | null)[]>([]);
@@ -192,6 +196,7 @@ export const CatchGame: React.FC<GameComponentProps> = ({
       particles.current.forEach((p) => (p.active = false));
       floats.current.forEach((f) => (f.active = false));
       catcherXPct.current = 50;
+      catcherDispX.current = 50;
       setHearts(0);
       setScore(0);
       setLives(presetRef.current.lives);
@@ -265,6 +270,15 @@ export const CatchGame: React.FC<GameComponentProps> = ({
     }
   }, []);
 
+  // Себеттің «ұстау» / «ауыру» анимациясын қайта іске қосады
+  const bumpBasket = useCallback((cls: 'anim-basket-catch' | 'anim-basket-hurt') => {
+    const el = basketInnerRef.current;
+    if (!el) return;
+    el.classList.remove('anim-basket-catch', 'anim-basket-hurt');
+    void el.offsetWidth; // reflow — анимация қайта басталсын
+    el.classList.add(cls);
+  }, []);
+
   const loseLife = useCallback((soft: boolean) => {
     livesRef.current = Math.max(0, livesRef.current - 1);
     setLives(livesRef.current);
@@ -272,10 +286,11 @@ export const CatchGame: React.FC<GameComponentProps> = ({
     setCombo(0);
     setShake((s) => s + 1);
     buzz(soft ? 20 : [18, 40, 18]);
+    if (!soft) bumpBasket('anim-basket-hurt');
     if (livesRef.current === 0) {
       shell.endRound('loss', { scoreValue: scoreRef.current });
     }
-  }, [shell]);
+  }, [shell, bumpBasket]);
 
   // ── the one and only game loop ──────────────────────────────────────────
   const step = useCallback(
@@ -299,7 +314,11 @@ export const CatchGame: React.FC<GameComponentProps> = ({
       }
       const fieldW = field.clientWidth;
       const fieldH = field.clientHeight;
-      const catcherPx = (catcherXPct.current / 100) * fieldW;
+      // себет саусаққа/тышқанға жұмсақ ілеседі (бірден секірмейді)
+      const targetPct = catcherXPct.current;
+      catcherDispX.current += (targetPct - catcherDispX.current) * Math.min(1, dt * 20);
+      const catcherPx = (catcherDispX.current / 100) * fieldW;
+      const tilt = Math.max(-14, Math.min(14, (targetPct - catcherDispX.current) * 1.4));
       const catcherY = fieldH - 40;
       const slow = now < slowUntilRef.current ? 0.45 : 1;
 
@@ -325,13 +344,13 @@ export const CatchGame: React.FC<GameComponentProps> = ({
         let xPct = it.xPct;
         // magnet pulls collectibles toward the catcher
         if (now < magnetUntilRef.current && it.type !== 'broken') {
-          xPct += ((catcherXPct.current - xPct) * Math.min(1, dt * 3.2));
+          xPct += ((catcherDispX.current - xPct) * Math.min(1, dt * 3.2));
         }
         const yPx = it.yPx + it.speed * dt * slow;
         const caught =
           yPx > catcherY - 30 &&
           yPx < catcherY + 26 &&
-          Math.abs(((xPct / 100) * fieldW - catcherPx)) < 34;
+          Math.abs((xPct / 100) * fieldW - catcherPx) < CATCH_RADIUS;
         const escaped = yPx > fieldH + 40;
         if (escaped && (it.type === 'heart' || it.type === 'gold') && presetRef.current.missCostsLife) {
           loseLife(true);
@@ -353,6 +372,7 @@ export const CatchGame: React.FC<GameComponentProps> = ({
             scoreRef.current += points;
             setScore(scoreRef.current);
             popFloat(xPct, yPx, `+${points}`);
+            if (it.type !== 'magnet' && it.type !== 'frost') bumpBasket('anim-basket-catch');
             burstParticles(xPct, yPx, it.type === 'gold' || it.type === 'heart');
             if (it.type === 'gold') {
               gameAudio.play('gold');
@@ -404,13 +424,18 @@ export const CatchGame: React.FC<GameComponentProps> = ({
         el.dataset.on = '1';
         el.style.opacity = '1';
         // x is % of the field width, y is px — both in one translate3d:
-        el.style.transform = `translate3d(${(it.xPct / 100) * fieldW}px, ${it.yPx}px, 0)`;
+        const half = ITEM_SIZE[it.type] / 2;
+        const sway = it.type === 'broken' ? 0 : Math.sin(now / 280 + it.id) * 9;
+        el.style.transform = `translate3d(${(it.xPct / 100) * fieldW - half}px, ${it.yPx}px, 0) rotate(${sway.toFixed(1)}deg)`;
       }
 
       // catcher
       if (catcherRef.current) {
-        catcherRef.current.style.transform = `translate3d(calc(${catcherXPct.current}% - 32px), 0, 0)`;
+        // ТҮЗЕТУ: translate3d-тегі % — себеттің ӨЗ енінің %-ы (64px). Сондықтан себет жылжымай тұрып қалатын.
+        // Енді нақты px: (экран ені × %) − себеттің жарты ені.
+        catcherRef.current.style.transform = `translate3d(${catcherPx - BASKET_W / 2}px, 0, 0)`;
       }
+      if (basketInnerRef.current) basketInnerRef.current.style.rotate = `${tilt.toFixed(1)}deg`;
 
       // particles (DOM paints)
       for (let i = 0; i < PARTICLE_POOL; i++) {
@@ -456,8 +481,16 @@ export const CatchGame: React.FC<GameComponentProps> = ({
       }
       if (slowNow) slowActiveRef.current = true;
     },
-    [spawn, shell]
+    [spawn, shell, loseLife, bumpBasket]
   );
+
+  // Алаң пайда болған сәтте себетті дұрыс орынға қояды (бірінші кадрда сол жақта «жыпылықтамасын»)
+  useLayoutEffect(() => {
+    const f = fieldRef.current;
+    if (f && catcherRef.current) {
+      catcherRef.current.style.transform = `translate3d(${(catcherDispX.current / 100) * f.clientWidth - BASKET_W / 2}px, 0, 0)`;
+    }
+  }, [shell.phase]);
 
   // The loop only breathes while a round is actually live (paused/hidden = frozen).
   useRafLoop(shell.phase === 'playing', step);
@@ -540,7 +573,8 @@ export const CatchGame: React.FC<GameComponentProps> = ({
         steps,
       }}
       hud={{
-        score,
+        // мақсат — жүрек саны, сондықтан HUD-та да ұсталған жүректер көрсетіледі (ұпай нәтижеде)
+        score: hearts,
         targetScore: preset.targetHearts,
         lives: { max: preset.lives, current: lives },
         timerSec: timeSec,
@@ -615,7 +649,9 @@ export const CatchGame: React.FC<GameComponentProps> = ({
           ref={catcherRef}
           className="absolute bottom-1.5 left-0 pointer-events-none will-change-transform"
         >
-          <BasketGlyph size={64} />
+          <div ref={basketInnerRef} style={{ transformOrigin: '50% 100%' }}>
+            <BasketGlyph size={BASKET_W} />
+          </div>
         </div>
 
         <div className="absolute bottom-0 left-0 right-0 text-center text-[9px] uppercase tracking-wider text-[var(--text-faint)] pointer-events-none pb-0.5">
