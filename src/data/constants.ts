@@ -530,18 +530,32 @@ export const DAILY_MESSAGES: DailyMessage[] = [
     hint: 'Жоқ мен өзімді сенің алдыңда асыра сілтеп жатқаным жоқ,сен онсызда білесің депше хе! '
   },
    {
-    id: 64,
-    dayNumber: 64,
+    id: 69,
+    dayNumber: 69,
     question: '«Мен саған жазған хаттардың қайсысы ерекше деп санайсың?»',   // ← міндетті
     questionHint: 'Ойыңа бірінші келген жауапты жаз',          // міндетті емес
     questionCategory: 'relationship',  // favorites | memory | relationship | future | fun
   },
   {
-    id: 65,
-    dayNumber: 65,
+    id: 70,
+    dayNumber: 70,
     question: '«Сенің ең сүйікті тағамың қандай?»',   // ← міндетті
     questionHint: 'Ойыңа бірінші келген жауапты жаз',          // міндетті емес
     questionCategory: 'relationship',  // favorites | memory | relationship | future | fun
+  },
+  {
+    id: 71,
+    dayNumber: 71,
+    title: 'Қатты сағындым',
+    text: 'Аңсарым саған ауып,сағынышым сары уайымға айналды.',
+    hint: 'Көзім жолыңда,көңілім өзіңде. '
+  },
+  {
+    id: 72,
+    dayNumber: 72,
+    title: 'Қатты сағындым',
+    text: 'Аңсарым саған ауып,сағынышым сары уайымға айналды.',
+    hint: 'Көзім жолыңда,көңілім өзіңде. '
   },
   
   
