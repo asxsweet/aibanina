@@ -34,7 +34,7 @@ import {
   adminFetchAnswers, adminDeleteAnswer,
   AdminAnswerRow,
 } from '../utils/dailyQuestionApi';
-import { QUESTION_CATEGORY_LABELS } from '../utils/dailyContent';
+import { QUESTION_CATEGORY_LABELS, buildDailyContent } from '../utils/dailyContent';
 
 const SEEN_ANSWERS_KEY = 'nashe_sozvezdie_seen_answers_v1';
 
@@ -130,6 +130,8 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
   const [usersProgress, setUsersProgress] = useState<UserProgressSnapshot[]>([]);
   const [dayLogs, setDayLogs] = useState<DayLogEntry[]>([]);
   const [allReplies, setAllReplies] = useState<DailyReply[]>([]);
+// The selected partner's saved "Бүгінгі сұрақ" answers (question days).
+const [partnerQuestionAnswers, setPartnerQuestionAnswers] = useState<AdminAnswerRow[]>([]);
   const [partnerLoading, setPartnerLoading] = useState(false);
   const [partnerError, setPartnerError] = useState('');
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
@@ -784,6 +786,29 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
     return map;
   }, [allReplies]);
 
+  // Latest question answer per day for the selected partner.
+  const questionAnswerLookup = useMemo(() => {
+    const map: Record<number, AdminAnswerRow> = {};
+    [...partnerQuestionAnswers]
+      .sort((a, b) => a.updatedAt - b.updatedAt)
+      .forEach((a) => { map[a.dayNumber] = a; });
+    return map;
+  }, [partnerQuestionAnswers]);
+
+  // Load the selected partner's question answers whenever the selection (or
+  // the panel) changes.
+  useEffect(() => {
+    if (!isOpen || !selectedUserId) {
+      setPartnerQuestionAnswers([]);
+      return;
+    }
+    let cancelled = false;
+    adminFetchAnswers({ userId: selectedUserId, limit: 200 })
+      .then((page) => { if (!cancelled) setPartnerQuestionAnswers(page.answers); })
+      .catch(() => { if (!cancelled) setPartnerQuestionAnswers([]); });
+    return () => { cancelled = true; };
+  }, [isOpen, selectedUserId]);
+
   // Every day (default or admin-overridden) that currently has a voice
   // message attached — this is the full list the audio check runs against.
   const voiceDays = useMemo(() => {
@@ -879,8 +904,12 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
     if (!selectedPartner) return [];
     const days = Array.from({ length: selectedPartner.daysPlayed }, (_, i) => i + 1);
     const rows = days.map((day) => {
-      const base = DAILY_MESSAGES[(day - 1) % DAILY_MESSAGES.length];
-      const effective = applyMessageOverride(base, overrides[day]);
+      // Unified day content — question days are NOT letters: they have a
+      // question (and, once answered, a question answer) instead of a letter
+      // text. Using the letter-only merge here used to render question days
+      // as "«»".
+      const content = buildDailyContent(day, overrides[day]);
+      const isQuestion = content.contentType === 'question';
       // The day-log only exists for stars earned after this tracking feature
       // shipped. For the most recently earned day, the progress snapshot's
       // own lastPlayTimestamp already tells us exactly when — so that's used
@@ -890,18 +919,35 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
         dayLogLookup[day] || (isLatestDay ? selectedPartner.lastPlayTimestamp || null : null);
       return {
         day,
-        title: effective.title,
-        text: effective.text,
-        hint: effective.hint,
+        // Question days get a stable label; letter days keep the subject line.
+        title: isQuestion ? 'Бүгінгі сұрақ' : (content.title || ''),
+        text: content.text || '',
+        hint: content.hint,
+        // question-day fields
+        contentType: content.contentType,
+        question: content.question || '',
+        questionHint: content.questionHint || '',
+        questionCategory: content.questionCategory || null,
+        questionAnswer: questionAnswerLookup[day] || null,
         completedAt,
         reply: replyLookup[day] || null,
       };
     });
     return dayOrder === 'latest' ? [...rows].reverse() : rows;
-  }, [selectedPartner, dayLogLookup, replyLookup, overrides, dayOrder]);
+  }, [selectedPartner, dayLogLookup, replyLookup, questionAnswerLookup, overrides, dayOrder]);
 
   const missingReplyCount = useMemo(
-    () => partnerDayRows.filter((r) => !r.reply || (!r.reply.mood && !r.reply.text)).length,
+    () =>
+      partnerDayRows.filter(
+        (r) =>
+          r.contentType !== 'question' &&
+          (!r.reply || (!r.reply.mood && !r.reply.text))
+      ).length,
+    [partnerDayRows]
+  );
+
+  const missingQuestionAnswerCount = useMemo(
+    () => partnerDayRows.filter((r) => r.contentType === 'question' && !r.questionAnswer).length,
     [partnerDayRows]
   );
 
@@ -1012,9 +1058,9 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
           >
             <Users className="w-3.5 h-3.5" />
             Серіктес
-            {missingReplyCount > 0 && (
+            {missingReplyCount + missingQuestionAnswerCount > 0 && (
               <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 text-white text-[9px] font-bold flex items-center justify-center">
-                {missingReplyCount > 9 ? '9+' : missingReplyCount}
+                {missingReplyCount + missingQuestionAnswerCount > 9 ? '9+' : missingReplyCount + missingQuestionAnswerCount}
               </span>
             )}
           </button>
@@ -1762,6 +1808,10 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
                       <div className="space-y-2">
                         {partnerDayRows.map((row) => {
                           const hasReply = !!(row.reply && (row.reply.mood || row.reply.text));
+                          const isQuestionDay = row.contentType === 'question';
+                          const answered = isQuestionDay
+                            ? !!row.questionAnswer?.answer
+                            : hasReply;
                           const isExpanded = expandedDay === row.day;
                           return (
                             <div
@@ -1778,7 +1828,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
                                     {row.day}
                                   </span>
                                   <span className="text-xs font-semibold text-[var(--text)] truncate">{row.title}</span>
-                                  {!hasReply && (
+                                  {!answered && (
                                     <AlertCircle className="w-3 h-3 flex-shrink-0 text-rose-500/80" />
                                   )}
                                 </div>
@@ -1805,19 +1855,57 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({ isOpen, onClose, mode = 
                                     </div>
                                   </div>
 
-                                  {/* Full constellation message content */}
-                                  <div className="p-2.5 rounded-xl bg-[var(--bg-soft)] border border-[var(--border)]">
-                                    <div className="text-[10px] uppercase tracking-wide font-semibold text-[var(--accent)] mb-1">
-                                      {row.title}
+                                  {/* Full constellation message content — a letter
+                                      (or the day's question on question days).
+                                      Question days carry no letter text, so
+                                      they render as "«»" unless handled. */}
+                                  {row.contentType === 'question' ? (
+                                    <div className="p-2.5 rounded-xl bg-[var(--bg-soft)] border border-[var(--border)]">
+                                      <div className="flex items-center gap-1.5 text-[10px] uppercase tracking-wide font-semibold text-[var(--accent)] mb-1">
+                                        <HelpCircle className="w-3 h-3" />
+                                        Бүгінгі сұрақ
+                                        {row.questionCategory && QUESTION_CATEGORY_LABELS[row.questionCategory] && (
+                                          <span className="rounded-full bg-[var(--accent-2)]/10 border border-[var(--accent-2)]/25 px-1.5 text-[9px] normal-case text-[var(--accent-2-dark)]">
+                                            {QUESTION_CATEGORY_LABELS[row.questionCategory]}
+                                          </span>
+                                        )}
+                                      </div>
+                                      <p className="text-xs text-[var(--text)] italic leading-relaxed">{row.question}</p>
+                                      {row.questionHint && (
+                                        <p className="text-[11px] text-[var(--accent-2)] mt-1.5">✨ {row.questionHint}</p>
+                                      )}
                                     </div>
-                                    <p className="text-xs text-[var(--text)] italic leading-relaxed">«{row.text}»</p>
-                                    {row.hint && (
-                                      <p className="text-[11px] text-[var(--accent-2)] mt-1.5">{row.hint}</p>
-                                    )}
-                                  </div>
+                                  ) : (
+                                    <div className="p-2.5 rounded-xl bg-[var(--bg-soft)] border border-[var(--border)]">
+                                      <div className="text-[10px] uppercase tracking-wide font-semibold text-[var(--accent)] mb-1">
+                                        {row.title}
+                                      </div>
+                                      <p className="text-xs text-[var(--text)] italic leading-relaxed">«{row.text}»</p>
+                                      {row.hint && (
+                                        <p className="text-[11px] text-[var(--accent-2)] mt-1.5">{row.hint}</p>
+                                      )}
+                                    </div>
+                                  )}
 
-                                  {/* Her reply to "how do you feel today" */}
-                                  {hasReply ? (
+                                  {/* Question days: her saved question answer.
+                                      Letter days: her daily mood/text reply. */}
+                                  {row.contentType === 'question' ? (
+                                    row.questionAnswer ? (
+                                      <div className="flex items-start gap-2 p-2.5 rounded-xl bg-emerald-400/10 border border-emerald-400/30">
+                                        <span className="text-[11px] text-emerald-600 font-semibold flex-shrink-0">
+                                          {row.questionAnswer.answer ? 'Жауап берді:' : ''}
+                                        </span>
+                                        <span className="text-xs text-[var(--text-secondary)] leading-snug break-words italic">
+                                          «{row.questionAnswer.answer}»
+                                        </span>
+                                      </div>
+                                    ) : (
+                                      <div className="flex items-center gap-1.5 p-2.5 rounded-xl bg-amber-400/10 border border-amber-400/30 text-[11px] text-amber-600 italic">
+                                        <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                                        Сұраққа жауап берілмеген
+                                      </div>
+                                    )
+                                  ) : hasReply ? (
                                     <div className="flex items-start gap-2 p-2.5 rounded-xl bg-[var(--bg-soft)] border border-[var(--border)]">
                                       {row.reply?.mood && <span className="text-base flex-shrink-0">{row.reply.mood}</span>}
                                       {row.reply?.text && (

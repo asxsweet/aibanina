@@ -32,43 +32,52 @@ export const DailyQuestionModal: React.FC<DailyQuestionModalProps> = ({
   const [status, setStatus] = useState<'loading' | 'idle' | 'saving' | 'saved'>('loading');
   const [errorMessage, setErrorMessage] = useState('');
   const [infoMessage, setInfoMessage] = useState('');
-  const dayKeyRef = useRef<number | null>(null);
+  // True once she typed something for the currently loaded question — a late
+  // fetchDayAnswer response must never overwrite what she is writing.
+  const typedRef = useRef(false);
 
   // (Re)load the previously saved answer whenever a different question
   // opens — one row per (user, day, questionId), so editing just updates it.
+  // StrictMode mounts this effect twice in dev; each run owns its request
+  // via the cancelled flag + AbortController, so exactly the live run may
+  // touch state (the old dayKeyRef guard swallowed the second run and left
+  // the modal stuck at "Жүктелуде…" with the textarea disabled).
   useEffect(() => {
     if (!content || content.contentType !== 'question') return;
-    if (dayKeyRef.current === content.dayNumber) return;
-    dayKeyRef.current = content.dayNumber;
     setStatus('loading');
     setAnswer('');
     setSavedAnswer('');
     setErrorMessage('');
     setInfoMessage('');
+    typedRef.current = false;
 
+    const controller = new AbortController();
     let cancelled = false;
-    fetchDayAnswer(content.dayNumber)
+    fetchDayAnswer(content.dayNumber, controller.signal)
       .then((existing) => {
         if (cancelled) return;
-        if (existing) {
+        if (existing && !typedRef.current) {
           setAnswer(existing.answer || '');
           setSavedAnswer(existing.answer || '');
         }
-        setStatus('idle');
+        setStatus((s) => (s === 'loading' ? 'idle' : s));
       })
       .catch(() => {
-        // Offline: the form is still usable — saving goes to the queue.
-        if (!cancelled) setStatus('idle');
+        // Aborted (closed / re-run) or offline: the form stays usable —
+        // saving goes to the queue while offline.
+        if (!cancelled) setStatus((s) => (s === 'loading' ? 'idle' : s));
       });
     return () => {
       cancelled = true;
+      controller.abort();
     };
-  }, [content?.dayNumber, content?.contentType]);
+  }, [content?.dayNumber, content?.contentType, content?.questionId]);
 
   const trimmedLength = answer.trim().length;
   const validation = validateAnswer(answer);
+  // 'loading' is a background refresh of the saved copy — typing and saving
+  // already work meanwhile (the loaded copy is only applied while untouched).
   const canSave =
-    status !== 'loading' &&
     status !== 'saving' &&
     trimmedLength >= 1 &&
     trimmedLength <= MAX_ANSWER_LENGTH;
@@ -87,6 +96,8 @@ export const DailyQuestionModal: React.FC<DailyQuestionModalProps> = ({
         dayNumber: content.dayNumber,
         questionId: content.questionId || `day-${content.dayNumber}-question`,
         question: content.question || '',
+        questionHint: content.questionHint || '',
+        questionCategory: content.questionCategory || 'relationship',
         answer,
       });
       if (!result.ok) {
@@ -112,7 +123,8 @@ export const DailyQuestionModal: React.FC<DailyQuestionModalProps> = ({
         });
       }
       setTimeout(() => {
-        if (status === 'saved') setStatus('idle');
+        // Functional form — `status` from this closure is already stale here.
+        setStatus((s) => (s === 'saved' ? 'idle' : s));
       }, 2500);
     } catch {
       setErrorMessage('Жауапты сақтау мүмкін болмады. Қайталап көріңіз.');
@@ -182,13 +194,13 @@ export const DailyQuestionModal: React.FC<DailyQuestionModalProps> = ({
               value={answer}
               onChange={(e) => {
                 // Plain text only — no HTML is ever interpreted anywhere.
+                typedRef.current = true;
                 setAnswer(e.target.value.slice(0, MAX_ANSWER_LENGTH));
                 if (errorMessage) setErrorMessage('');
               }}
               placeholder="Жауабыңды осында жаз…"
               rows={5}
               maxLength={MAX_ANSWER_LENGTH}
-              disabled={status === 'loading'}
               className="w-full rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] px-4 py-3 text-sm text-[var(--text)] placeholder:text-[var(--text-faint)] outline-none resize-none focus:border-[var(--accent)]/50 disabled:opacity-50"
             />
             <div className="flex items-center justify-between mt-1">

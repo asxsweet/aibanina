@@ -18,10 +18,20 @@ interface ApiResult<T> {
   networkError?: boolean;
 }
 
+// Every request gets a hard timeout: a hung server (e.g. a cold start)
+// rejects instead of freezing the caller. Offline/error paths on the
+// caller side treat that exactly like a network failure.
+const REQUEST_TIMEOUT_MS = 20000;
+
 async function api<T>(path: string, init?: RequestInit): Promise<ApiResult<T>> {
   try {
+    const timeoutSignal = AbortSignal.timeout(REQUEST_TIMEOUT_MS);
+    const signal = init?.signal
+      ? (AbortSignal.any ? AbortSignal.any([init.signal, timeoutSignal]) : init.signal)
+      : timeoutSignal;
     const res = await fetch(`${API_BASE}${path}`, {
       ...init,
+      signal,
       headers: init?.body ? { 'Content-Type': 'application/json', ...(init.headers || {}) } : init?.headers,
     });
     let data: any = null;
@@ -52,6 +62,8 @@ interface QueuedAnswer {
   dayNumber: number;
   questionId: string;
   question: string;
+  questionHint?: string;
+  questionCategory?: string;
   answer: string;
   date: string;
 }
@@ -123,8 +135,8 @@ export function installDailyQuestionFlush(): void {
 
 // ---------------------------------------------------------------- endpoints
 
-export async function fetchDayAnswer(dayNumber: number): Promise<DailyQuestionAnswer | null> {
-  const r = await api<{ answer: DailyQuestionAnswer | null }>(`/api/daily-question/day/${dayNumber}`);
+export async function fetchDayAnswer(dayNumber: number, signal?: AbortSignal): Promise<DailyQuestionAnswer | null> {
+  const r = await api<{ answer: DailyQuestionAnswer | null }>(`/api/daily-question/day/${dayNumber}`, { signal });
   return r.data?.answer ?? null;
 }
 
@@ -144,12 +156,21 @@ export async function saveQuestionAnswer(params: {
   dayNumber: number;
   questionId: string;
   question: string;
+  questionHint?: string;
+  questionCategory?: string;
   answer: string;
 }): Promise<SaveAnswerResult> {
   const answer = params.answer.trim();
+  // The server only has admin-created documents for a day; built-in question
+  // days (constants.ts, e.g. 69/70) exist only in the client bundle, so the
+  // question snapshot travels with the request — the server records it and
+  // creates the day's document from it.
   const body = {
     dayNumber: params.dayNumber,
     questionId: params.questionId,
+    question: params.question,
+    questionHint: params.questionHint || '',
+    questionCategory: params.questionCategory || 'relationship',
     answer,
     date: getTodayDateString(),
   };
@@ -163,6 +184,8 @@ export async function saveQuestionAnswer(params: {
       dayNumber: params.dayNumber,
       questionId: params.questionId,
       question: params.question,
+      questionHint: params.questionHint,
+      questionCategory: params.questionCategory,
       answer,
       date: body.date,
     });

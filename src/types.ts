@@ -4,7 +4,7 @@ export interface DailyMessage {
   id: number;
   dayNumber: number;
   title?: string;
-  text: string;
+  text?: string;
   hint?: string;
   voiceUrl?: string; // optional mp3 for the weekly voice-message days (every 7th day)
   // Question variant: when `question` is non-empty this built-in day opens

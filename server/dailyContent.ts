@@ -187,14 +187,65 @@ export function registerDailyContentRoutes(app: Express, deps: DailyContentDeps)
       // The day must really have a question assigned, and the client's
       // questionId (when given) must match — question text always comes
       // from the server, never from the request.
-      const doc = await DailyContentModel.findOne({ dayNumber }).lean();
-      if (!doc || (doc.contentType as DailyContentType) !== 'question') {
-        return res.status(400).json({ error: 'Бұл күнге сұрақ тағайындалмаған.' });
-      }
-      const questionId = doc.questionId || `day-${dayNumber}-question`;
+      //
+      // Built-in question days (constants.ts entries with a `question` field,
+      // e.g. day 69/70) have NO server document when the admin hasn't touched
+      // that day — but the client still shows the question and POSTs here.
+      // Before this branch the save was rejected ("Бұл күнге сұрақ
+      // тағайындалмаған"), so the partner could never submit an answer.
+      // Now: when no server doc exists yet, adopt the client's snapshot and
+      // create the document lazily — one question of record per day.
       const clientQuestionId = str(req.body?.questionId, 80);
-      if (clientQuestionId && clientQuestionId !== questionId) {
-        return res.status(400).json({ error: 'Сұрақ идентификаторы дұрыс емес.' });
+      const fallbackQuestionId = `day-${dayNumber}-question`;
+      const doc = await DailyContentModel.findOne({ dayNumber }).lean();
+
+      let questionId: string;
+      let questionText: string;
+      let questionHintText: string;
+      let questionCategoryText: QuestionCategory;
+
+      if (doc && (doc.contentType as DailyContentType) === 'question') {
+        questionId = doc.questionId || fallbackQuestionId;
+        questionText = doc.question || '';
+        questionHintText = doc.questionHint || '';
+        questionCategoryText = QUESTION_CATEGORIES.includes(doc.questionCategory as QuestionCategory)
+          ? (doc.questionCategory as QuestionCategory)
+          : 'relationship';
+        if (clientQuestionId && clientQuestionId !== questionId) {
+          return res.status(400).json({ error: 'Сұрақ идентификаторы дұрыс емес.' });
+        }
+      } else {
+        // No document at all → only trust a full client snapshot for an
+        // auto-assigned built-in id; a custom questionId asks for a day the
+        // server doesn't know (and a letter day is simply never a question).
+        if (clientQuestionId && clientQuestionId !== fallbackQuestionId) {
+          return res.status(400).json({ error: 'Сұрақ идентификаторы дұрыс емес.' });
+        }
+        questionText = str(req.body?.question, 1000);
+        if (!questionText) {
+          return res.status(400).json({ error: 'Бұл күнге сұрақ тағайындалмаған.' });
+        }
+        questionId = fallbackQuestionId;
+        questionHintText = str(req.body?.questionHint, 300);
+        const catRaw = str(req.body?.questionCategory, 20) as QuestionCategory;
+        questionCategoryText = QUESTION_CATEGORIES.includes(catRaw) ? catRaw : 'relationship';
+        // Never overwrite an existing (letter) day — this upsert only runs
+        // when `doc` was absent, so it inserts a fresh row or repairs a row
+        // that lost its fields.
+        await DailyContentModel.updateOne(
+          { dayNumber },
+          {
+            $set: {
+              contentType: 'question',
+              questionId,
+              question: questionText,
+              questionHint: questionHintText,
+              questionCategory: questionCategoryText,
+            },
+            $setOnInsert: { dayNumber },
+          },
+          { upsert: true }
+        );
       }
 
       const userId = req.auth.email;
@@ -207,9 +258,9 @@ export function registerDailyContentRoutes(app: Express, deps: DailyContentDeps)
             answer,
             userName,
             date: str(req.body?.date, 10),
-            question: doc.question || '',
-            questionHint: doc.questionHint || '',
-            questionCategory: doc.questionCategory || 'relationship',
+            question: questionText,
+            questionHint: questionHintText,
+            questionCategory: questionCategoryText,
             updatedAt: now,
           },
           $setOnInsert: {
