@@ -550,7 +550,34 @@ export const DAILY_MESSAGES: DailyMessage[] = [
     text: 'Аңсарым саған ауып,сағынышым сары уайымға айналды.',
     hint: 'Көзім жолыңда,көңілім өзіңде. '
   },
- 
+  {
+    id: 72,
+    dayNumber: 72,
+    question: '«Сен үшін қарым қатынаста ең маңыздысы не нәрсе?»',   // ← міндетті
+    questionHint: 'Ойыңды ашық айт.',          // міндетті емес
+    questionCategory: 'relationship',  // favorites | memory | relationship | future | fun
+  },
+   {
+    id: 73,
+    dayNumber: 73,
+    question: '«Сен мұңайғанда,көңіл күйіңді не нәрсе көтереді?»',   // ← міндетті
+    questionHint: 'Менен басқа не нәрсе көңіліңді көтереді?хе',          // міндетті емес
+    questionCategory: 'relationship',  // favorites | memory | relationship | future | fun
+  },
+   {
+    id: 74,
+    dayNumber: 74,
+    question: '«Сен үшін бақыт деген не?»',   // ← міндетті
+    questionHint: 'Бақыт деген ақшада ұғымы сен үшін қалай?.',          // міндетті емес
+    questionCategory: 'relationship',  // favorites | memory | relationship | future | fun
+  },
+   {
+    id: 71,
+    dayNumber: 71,
+    title: 'Люблю',
+    text: 'Сен менің - өмірімсің,бақытымсың және тағдырымсың ',
+    hint: 'Шумақтардан. '
+  },
   
   
 ];
