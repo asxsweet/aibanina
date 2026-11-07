@@ -190,7 +190,7 @@ const [partnerQuestionAnswers, setPartnerQuestionAnswers] = useState<AdminAnswer
     };
   }, [isOpen]);
 
-  const handleDuelSave = async (clear: boolean) => {
+  const handleDuelSave = async (clear = false) => {
     setDuelSaving(true);
     setDuelNote(null);
     const res = clear ? await clearDuelSetting() : await saveDuelSetting(duelPair.a, duelPair.b);
@@ -1736,7 +1736,7 @@ const [partnerQuestionAnswers, setPartnerQuestionAnswers] = useState<AdminAnswer
                 </div>
                 <div className="flex items-center gap-2">
                   <button
-                    onClick={handleDuelSave}
+                    onClick={() => handleDuelSave(false)}
                     disabled={duelSaving || !duelPair.a || !duelPair.b || duelPair.a === duelPair.b}
                     className="flex-1 flex items-center justify-center gap-1.5 py-2 min-h-[36px] rounded-xl btn-gold text-xs font-bold disabled:opacity-50"
                   >
