@@ -167,7 +167,13 @@ export const GameHub: React.FC<GameHubProps> = ({
   const recordsText = useMemo(() => {
     if (!summary || summary.best === null) return null;
     const mine = `${fmtMetricValue(summary.metric, summary.best)}`;
-    if (!summary.rival) return `Рекордың: ${mine}`;
+    if (!summary.rival) {
+      // Дуэль жұбы белгіленген, бірақ ол әлі ойнамаған — есімімен айтамыз.
+      if (summary.rivalName) {
+        return `Рекордың: ${mine} · Ол (${summary.rivalName}): әлі ойламаған`;
+      }
+      return `Рекордың: ${mine}`;
+    }
     return `Сенікі: ${mine} · Серіктес (${summary.rival.name || 'ол'}): ${fmtMetricValue(
       summary.rival.metric,
       summary.rival.bestValue

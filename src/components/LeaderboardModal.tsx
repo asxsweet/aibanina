@@ -21,7 +21,8 @@ import {
   Crown, Flame, Loader2, Play, Send, Sparkles, Star, Swords, Timer, Trophy, X,
 } from 'lucide-react';
 import { GAME_ORDER, GAME_LABELS, GAME_ICONS } from './GameHub';
-import { fetchScores, type ScoreRow } from '../utils/featureApi';
+import { fetchScores, type ScoreRow, type ScoresResponse } from '../utils/featureApi';
+import { getCurrentUser } from '../utils/authUtils';
 import type { GameId } from './gameTypes';
 import type { DifficultyName } from '../utils/constellationUtils';
 
@@ -222,7 +223,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
   onPlay,
   currentDifficulty = 'easy',
 }) => {
-  const [data, setData] = useState<{ me: string; scores: ScoreRow[] } | null>(null);
+  const [data, setData] = useState<ScoresResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [diff, setDiff] = useState<DifficultyName>(currentDifficulty);
   const [detail, setDetail] = useState<GameId | null>(null);
@@ -241,13 +242,34 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
 
   const now = useMemo(() => Date.now(), []);
 
-  // (game, difficulty) → мен + серіктес (екіадасыз жұп; бірнеше қарсылас
-  // болса — ең жақсы нәтижесін қабылдаймыз)
+  // Нақты есімдер: «Сен» — өз профиль есімі, «Ол» — админ таңдаған жарыс
+  // серіктесі (әлі ойламаған болса да), әйтпесе нәтижесі бар қарсылас есімі.
+  const playerName = useMemo(() => {
+    const n = getCurrentUser()?.name?.trim();
+    return n || '';
+  }, []);
+  const rivalName = useMemo(() => {
+    return (
+      data?.duel?.rival?.name?.trim() ||
+      (data?.scores ?? []).find((s) => s.userId !== data?.me && s.name?.trim())?.name?.trim() ||
+      ''
+    );
+  }, [data]);
+  // Аватар ішіндегі әріп
+  const myInitial = (playerName.charAt(0) || 'С').toUpperCase();
+  const rivalInitial = (rivalName.charAt(0) || 'О').toUpperCase();
+  // Жолақ атаулары: «Сен · Айгерім» / «Ол · Аслан»
+  const myLabel = playerName ? `Сен · ${playerName}` : 'Сен';
+  const rivalLabel = rivalName ? `Ол · ${rivalName}` : 'Ол';
+
+  // (game, difficulty) → мен + серіктес. Админ жұп таңдаған болса — тек сонымен
+  // (басқа акаунттар еленбейді), әйтпесе басқа ойыншылардың ең жақсысымен.
   const pairs = useMemo(() => {
     const map = new Map<string, Pair>();
     for (const g of GAME_ORDER) {
       for (const d of DIFFICULTY_ORDER) map.set(`${g}:${d}`, pairOf(null, null, now));
     }
+    const rivalId = data?.duel?.rival?.userId || null;
     for (const row of data?.scores ?? []) {
       const gid = row.gameId as GameId;
       const d = row.difficulty as DifficultyName;
@@ -257,10 +279,11 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
       if (row.userId === data?.me) {
         map.set(key, pairOf(row, cur.theirs, now));
       } else if (
-        !cur.theirs ||
-        (row.metric === 'score'
-          ? row.bestValue > cur.theirs.bestValue
-          : row.bestValue < cur.theirs.bestValue)
+        rivalId === row.userId &&
+        (!cur.theirs ||
+          (row.metric === 'score'
+            ? row.bestValue > cur.theirs.bestValue
+            : row.bestValue < cur.theirs.bestValue))
       ) {
         map.set(key, pairOf(cur.mine, row, now));
       }
@@ -365,10 +388,15 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                             : 'bg-[var(--accent)]/15 text-[var(--accent)] border border-[var(--accent)]/40'
                         }`}
                       >
-                        С
+                        {myInitial}
                       </div>
                     </div>
-                    <span className="text-[10px] font-bold text-[var(--text-secondary)]">Сен</span>
+                    <span
+                      className="text-[10px] font-bold text-[var(--text-secondary)] text-center leading-tight max-w-16 break-words"
+                      title={myLabel}
+                    >
+                      {myLabel}
+                    </span>
                   </div>
 
                   {/* есеп */}
@@ -401,10 +429,15 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                             : 'bg-[var(--accent-2)]/15 text-[var(--accent-2)] border border-[var(--accent-2)]/40'
                         }`}
                       >
-                        О
+                        {rivalInitial}
                       </div>
                     </div>
-                    <span className="text-[10px] font-bold text-[var(--text-secondary)]">Ол</span>
+                    <span
+                      className="text-[10px] font-bold text-[var(--text-secondary)] text-center leading-tight max-w-16 break-words"
+                      title={rivalLabel}
+                    >
+                      {rivalLabel}
+                    </span>
                   </div>
                 </div>
                 <p className="mt-4 text-center text-[11px] font-semibold text-[var(--accent)] leading-snug px-2">
@@ -489,14 +522,14 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                       {header}
                       <PlayerRow
                         mine
-                        label="Сен"
+                        label={myLabel}
                         crown={p.leaderIsMe}
                         value={p.mine ? fmtValue(metric, p.mine.bestValue) : '—'}
                         pct={barPct(metric, p.mine, p.theirs)}
                       />
                       <PlayerRow
                         mine={false}
-                        label="Ол"
+                        label={rivalLabel}
                         crown={p.state === 'behind'}
                         value={p.theirs ? fmtValue(metric, p.theirs.bestValue) : '—'}
                         pct={barPct(metric, p.theirs, p.mine)}
@@ -600,14 +633,14 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                               <>
                                 <PlayerRow
                                   mine
-                                  label="Сен"
+                                  label={myLabel}
                                   crown={r.p.leaderIsMe}
                                   value={m ? fmtValue(metric, m.bestValue) : '—'}
                                   pct={barPct(metric, m, t)}
                                 />
                                 <PlayerRow
                                   mine={false}
-                                  label="Ол"
+                                  label={rivalLabel}
                                   crown={r.p.state === 'behind'}
                                   value={t ? fmtValue(metric, t.bestValue) : '—'}
                                   pct={barPct(metric, t, m)}

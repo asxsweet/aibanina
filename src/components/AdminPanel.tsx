@@ -3,7 +3,7 @@ import {
   X, ShieldCheck, BarChart3, BookOpen, Gamepad2, Loader2, Save, RotateCcw,
   Image as ImageIcon, Heart, Video as VideoIcon, Link2, Check, Users, Flame,
   CalendarCheck, AlertCircle, User, Clock, Volume2, RefreshCw, XCircle, CheckCircle2, HelpCircle,
-  Send, Eye, LogOut, Sparkles, Mail, BookHeart, Music, Upload, Gift, MessageCircleHeart,
+  Send, Eye, LogOut, Sparkles, Mail, BookHeart, Music, Upload, Gift, MessageCircleHeart, Swords,
 } from 'lucide-react';
 import { DAILY_MESSAGES } from '../data/constants';
 import { AdminExtras } from './AdminExtras';
@@ -19,6 +19,9 @@ import {
 import { resizeImage } from '../utils/photoUtils';
 import { DailyReply, DateInvite, DatePlanOption, StoryStage, StoryStatus } from '../types';
 import { getCurrentUser } from '../utils/authUtils';
+import {
+  fetchDuelSetting, saveDuelSetting, clearDuelSetting, DuelPairSetting,
+} from '../utils/featureApi';
 import { checkAudioUrl, AudioCheckResult } from '../utils/audioUtils';
 import { Gallery } from './Gallery';
 import { DreamsModal } from './DreamsModal';
@@ -166,6 +169,41 @@ const [partnerQuestionAnswers, setPartnerQuestionAnswers] = useState<AdminAnswer
   const [editingPlanLabel, setEditingPlanLabel] = useState('');
   const [savingPlanEdit, setSavingPlanEdit] = useState(false);
   const [deletingPlanId, setDeletingPlanId] = useState<string | null>(null);
+
+  // --- Жарыс жұбы (competition pair) ---------------------------------------
+  // The admin picks the two accounts that race against each other in the
+  // Жарыс section; the pair overrides the old "best other player" rival.
+  const [duelPair, setDuelPair] = useState<DuelPairSetting>({ a: '', b: '' });
+  const [duelSaving, setDuelSaving] = useState(false);
+  const [duelNote, setDuelNote] = useState<string | null>(null);
+  const [duelNoteError, setDuelNoteError] = useState(false);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    let cancelled = false;
+    fetchDuelSetting().then((d) => {
+      if (cancelled) return;
+      setDuelPair({ a: d?.a || '', b: d?.b || '' });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
+
+  const handleDuelSave = async (clear: boolean) => {
+    setDuelSaving(true);
+    setDuelNote(null);
+    const res = clear ? await clearDuelSetting() : await saveDuelSetting(duelPair.a, duelPair.b);
+    if (res.ok) {
+      setDuelNote(clear ? 'Жарыс жұбы жойылды — тағы да "ең жақсы қарсылас" режимі.' : 'Жарыс жұбы сақталды ✓');
+      setDuelNoteError(false);
+      if (clear) setDuelPair({ a: '', b: '' });
+    } else {
+      setDuelNote(res.error || 'Сақтау мүмкін болмады.');
+      setDuelNoteError(true);
+    }
+    setDuelSaving(false);
+  };
 
   // --- Editable "Серіктес" progress (streak / daysPlayed fix-up + reset) --
   const [editStreak, setEditStreak] = useState('');
@@ -1660,6 +1698,72 @@ const [partnerQuestionAnswers, setPartnerQuestionAnswers] = useState<AdminAnswer
 
           {activeTab === 'partner' && (
             <div>
+              {/* Жарыс жұбы: қай екі акаунт бір-бірімен жарысатынын таңдау */}
+              <div className="rounded-2xl border border-[var(--border)] bg-[var(--bg-card)] p-3 mb-4">
+                <div className="flex items-center gap-2 mb-1.5">
+                  <Swords className="w-4 h-4 text-[var(--accent)] shrink-0" />
+                  <span className="text-xs font-bold text-[var(--text)]">Жарыс жұбы</span>
+                </div>
+                <p className="text-[11px] text-[var(--text-faint)] leading-relaxed mb-2.5">
+                  Тіркелген акаунт көп — «Жарыс» бөлімінде осы екі ойыншы ғана бір-бірімен
+                  өлеседі («Сен» және «Ол»). Ойын нәтижесі болмаған серіктестің есімі де көрінеді.
+                </p>
+                <div className="grid grid-cols-2 gap-2 mb-2">
+                  {[0, 1].map((idx) => {
+                    const value = idx === 0 ? duelPair.a : duelPair.b;
+                    return (
+                      <label key={idx} className="block">
+                        <span className="block text-[10px] font-bold text-[var(--text-secondary)] mb-1">
+                          {idx === 0 ? 'Ойыншы 1' : 'Ойыншы 2'}
+                        </span>
+                        <select
+                          value={value}
+                          onChange={(e) =>
+                            setDuelPair((prev) => (idx === 0 ? { ...prev, a: e.target.value } : { ...prev, b: e.target.value }))
+                          }
+                          className="w-full px-2 py-2 min-h-[38px] rounded-xl border border-[var(--border)] bg-[var(--bg-elevated)] text-[11px] text-[var(--text)] focus:outline-none focus:border-[var(--accent)]/60"
+                        >
+                          <option value="">— таңдамаған —</option>
+                          {usersProgress.map((u) => (
+                            <option key={u.userId} value={u.userId}>
+                              {u.name?.trim() || u.userId.split('@')[0]} ({u.userId})
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleDuelSave}
+                    disabled={duelSaving || !duelPair.a || !duelPair.b || duelPair.a === duelPair.b}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 min-h-[36px] rounded-xl btn-gold text-xs font-bold disabled:opacity-50"
+                  >
+                    {duelSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Check className="w-3.5 h-3.5" />}
+                    Сақтау
+                  </button>
+                  <button
+                    onClick={() => handleDuelSave(true)}
+                    disabled={duelSaving || (!duelPair.a && !duelPair.b)}
+                    className="flex-1 flex items-center justify-center gap-1.5 py-2 min-h-[36px] rounded-xl border border-[var(--border)] text-[var(--text-secondary)] text-xs font-bold disabled:opacity-50"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    Таңдауды жою
+                  </button>
+                </div>
+                {(!duelPair.a || !duelPair.b) && (
+                  <p className="text-[10px] text-[var(--text-faint)] mt-1.5">
+                    Екеуін де таңдап сақта (немесе екеуін де алып тастап — ескі «ең жақсы қарсылас» режимі қайта орнайды).
+                  </p>
+                )}
+                {duelNote && (
+                  <p className={`text-[11px] mt-1.5 ${duelNoteError ? 'text-rose-500' : 'text-[var(--accent)] font-semibold'}`}>
+                    {duelNote}
+                  </p>
+                )}
+              </div>
+
               {partnerLoading ? (
                 <div className="flex flex-col items-center justify-center py-12 text-[var(--text-faint)]">
                   <Loader2 className="w-6 h-6 animate-spin mb-2" />

@@ -135,9 +135,37 @@ export interface ScoreRow {
   updatedAt: number;
 }
 
-export async function fetchScores(): Promise<{ me: string; scores: ScoreRow[] } | null> {
-  const r = await api<{ me: string; scores: ScoreRow[] }>('/api/scores');
+export async function fetchScores(): Promise<ScoresResponse | null> {
+  const r = await api<ScoresResponse>('/api/scores');
   return r.data;
+}
+
+// GET /api/scores жауабы: duel.rival — админ белгілеген жарыс серіктесінің
+// тіркесі (әлі нәтижесі болмаса да есімі беріледі).
+export interface DuelRivalIdentity { userId: string; name: string; }
+export interface ScoresResponse {
+  me: string;
+  scores: ScoreRow[];
+  duel?: { rival: DuelRivalIdentity | null } | null;
+}
+
+// --- Жарыс жұбы (админ баптаулары) ------------------------------------------
+
+export interface DuelPairSetting { a: string; b: string; }
+
+export async function fetchDuelSetting(): Promise<DuelPairSetting | null> {
+  const r = await api<{ duel: DuelPairSetting | null }>('/api/admin/duel');
+  return r.data?.duel ?? null;
+}
+
+export async function saveDuelSetting(a: string, b: string): Promise<{ ok: boolean; error?: string }> {
+  const r = await api<{ duel: DuelPairSetting | null }>('/api/admin/duel', json('PUT', { a, b }));
+  return { ok: r.ok, error: r.error };
+}
+
+export async function clearDuelSetting(): Promise<{ ok: boolean; error?: string }> {
+  const r = await api<{ duel: DuelPairSetting | null }>('/api/admin/duel', { method: 'DELETE' });
+  return { ok: r.ok, error: r.error };
 }
 
 export function formatDuration(ms: number): string {

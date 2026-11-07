@@ -187,6 +187,8 @@ export interface RoundSummary {
   best: number | null;
   plays: number;
   updatedAt: number | null;
+  /** Жарыс серіктесінің есімі — ойнамаған болса да беріледі (дуэль жұбы белгіленгенде). */
+  rivalName?: string | null;
   rival: RivalInfo | null;
 }
 

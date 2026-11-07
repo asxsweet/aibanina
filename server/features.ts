@@ -259,6 +259,56 @@ export function registerFeatureRoutes(app: Express, deps: FeatureDeps): void {
     return true;
   };
 
+  // --- Жарыс жұбы (duel pair) ------------------------------------------------
+  //
+  // The admin picks two registered accounts that race against each other in
+  // the Жарыс section. Stored as a SiteSetting { key: 'duel', value: { a, b } }
+  // (emails, lowercase). When the requester is one of them, the rival is
+  // exactly the other one — even if she has no score yet; any other account
+  // (or when no pair is set) falls back to the classic "best other player".
+  type DuelPair = { a: string; b: string } | null;
+
+  const getDuelPair = async (): Promise<DuelPair> => {
+    const doc = await SiteSettingModel.findOne({ key: 'duel' }).lean();
+    const v = (doc?.value || {}) as { a?: unknown; b?: unknown };
+    if (
+      typeof v.a === 'string' && typeof v.b === 'string' &&
+      v.a.trim() && v.b.trim() && v.a.trim().toLowerCase() !== v.b.trim().toLowerCase()
+    ) {
+      return { a: v.a.trim().toLowerCase(), b: v.b.trim().toLowerCase() };
+    }
+    return null;
+  };
+
+  const resolveDuelRival = (userId: string, pair: DuelPair): string | null =>
+    pair ? (userId === pair.a ? pair.b : userId === pair.b ? pair.a : null) : null;
+
+  // The rival's best record for this game+difficulty. Inside an established
+  // duel pair only that account counts (others are ignored); otherwise it's
+  // the best of everyone else — the old behavior.
+  const findRivalDoc = async (
+    gameId: string,
+    difficulty: string,
+    userId: string,
+    metric: 'time' | 'score'
+  ) => {
+    const rivalId = resolveDuelRival(userId, await getDuelPair());
+    const filter: Record<string, unknown> =
+      rivalId !== null
+        ? { gameId, difficulty, userId: rivalId }
+        : { gameId, difficulty, userId: { $ne: userId } };
+    return ScoreModel.findOne(filter)
+      .sort(metric === 'score' ? { bestValue: -1 } : { bestValue: 1, bestMs: 1 })
+      .lean();
+  };
+
+  // Rival's display name even when she has never played (no ScoreRow yet):
+  // the profile name stored on any of her records, else the email local-part.
+  const rivalIdentityName = async (rivalId: string): Promise<string> => {
+    const anyRow = await ScoreModel.findOne({ userId: rivalId }).lean();
+    return anyRow?.name || rivalId.split('@')[0] || 'Ол';
+  };
+
   const jointState = async (today: string) => {
     const [both, todayDoc] = await Promise.all([
       JointDayModel.find({ partner: true, admin: true }).select('date').lean(),
@@ -467,6 +517,49 @@ export function registerFeatureRoutes(app: Express, deps: FeatureDeps): void {
     }
   });
 
+  // --- Жарыс жұбы (competition pair): admin-only CRUD ------------------------
+  app.get('/api/admin/duel', async (req: Request, res: Response) => {
+    if (!req.auth || req.auth.role !== 'admin') return res.status(403).json({ error: 'Тек әкімшіге қолжетімді.' });
+    if (!(await ensureDb(res))) return;
+    try {
+      return res.json({ duel: await getDuelPair() });
+    } catch (err) {
+      console.error('Duel read error:', err);
+      return res.status(500).json({ error: 'Оқу мүмкін болмады.' });
+    }
+  });
+
+  app.put('/api/admin/duel', async (req: Request, res: Response) => {
+    if (!req.auth || req.auth.role !== 'admin') return res.status(403).json({ error: 'Тек әкімшіге қолжетімді.' });
+    if (!(await ensureDb(res))) return;
+    try {
+      const a = String(req.body?.a || '').trim().toLowerCase();
+      const b = String(req.body?.b || '').trim().toLowerCase();
+      const okEmail = (s: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s) && s.length <= 120;
+      if (!okEmail(a) || !okEmail(b)) {
+        return res.status(400).json({ error: 'Екі ойыншының да электронды поштасын дұрыс көрсет.' });
+      }
+      if (a === b) return res.status(400).json({ error: 'Екі ойыншы бір акаунт болмауы керек.' });
+      await SiteSettingModel.updateOne({ key: 'duel' }, { $set: { value: { a, b } } }, { upsert: true });
+      return res.json({ duel: { a, b } });
+    } catch (err) {
+      console.error('Duel save error:', err);
+      return res.status(500).json({ error: 'Сақтау мүмкін болмады.' });
+    }
+  });
+
+  app.delete('/api/admin/duel', async (req: Request, res: Response) => {
+    if (!req.auth || req.auth.role !== 'admin') return res.status(403).json({ error: 'Тек әкімшіге қолжетімді.' });
+    if (!(await ensureDb(res))) return;
+    try {
+      await SiteSettingModel.deleteOne({ key: 'duel' });
+      return res.json({ duel: null });
+    } catch (err) {
+      console.error('Duel delete error:', err);
+      return res.status(500).json({ error: 'Жою мүмкін болмады.' });
+    }
+  });
+
   // --- Wishes (paid with stardust) -----------------------------------------
   app.post('/api/wishes', async (req: Request, res: Response) => {
     if (!req.auth) return res.status(401).json({ error: 'Қайта кіру керек.' });
@@ -567,9 +660,7 @@ export function registerFeatureRoutes(app: Express, deps: FeatureDeps): void {
         { $set: { name, metric, bestValue, bestMs: metric === 'time' ? bestValue : 0, updatedAt: Date.now() }, $inc: { plays: 1 } },
         { upsert: true }
       );
-      const rivalDoc = await ScoreModel.findOne({ gameId, difficulty, userId: { $ne: userId } })
-        .sort(metric === 'score' ? { bestValue: -1 } : { bestValue: 1, bestMs: 1 })
-        .lean();
+      const rivalDoc = await findRivalDoc(gameId, difficulty, userId, metric);
       return res.json({
         bestMs: metric === 'time' ? bestValue : 0,
         bestValue,
@@ -590,8 +681,15 @@ export function registerFeatureRoutes(app: Express, deps: FeatureDeps): void {
     if (!(await ensureDb(res))) return;
     try {
       const docs = await ScoreModel.find({}).lean();
+      // The Жарыс rival's identity (name even if she has never played), so the
+      // duel screen can label players with real names from the very start.
+      const duelRivalId = resolveDuelRival(req.auth.email, await getDuelPair());
+      const duel = duelRivalId
+        ? { rival: { userId: duelRivalId, name: await rivalIdentityName(duelRivalId) } }
+        : { rival: null };
       return res.json({
         me: req.auth.email,
+        duel,
         scores: docs.map((s) => ({
           userId: s.userId,
           name: s.name,
@@ -690,9 +788,7 @@ export function registerFeatureRoutes(app: Express, deps: FeatureDeps): void {
       const existingRound = await GameRoundModel.findOne({ roundId }).lean();
       if (existingRound) {
         const posted = await ScoreModel.findOne({ userId: req.auth.email, gameId, difficulty }).lean();
-        const rivalDup = await ScoreModel.findOne({ gameId, difficulty, userId: { $ne: req.auth.email } })
-          .sort(metric === 'score' ? { bestValue: -1 } : { bestValue: 1, bestMs: 1 })
-          .lean();
+        const rivalDup = await findRivalDoc(gameId, difficulty, req.auth.email, metric);
         return res.json({
           accepted: true,
           duplicate: true,
@@ -772,9 +868,7 @@ export function registerFeatureRoutes(app: Express, deps: FeatureDeps): void {
         );
       }
 
-      const rivalDoc = await ScoreModel.findOne({ gameId, difficulty, userId: { $ne: userId } })
-        .sort(metric === 'score' ? { bestValue: -1 } : { bestValue: 1, bestMs: 1 })
-        .lean();
+      const rivalDoc = await findRivalDoc(gameId, difficulty, userId, metric);
       const rival = rivalDoc
         ? {
             name: rivalDoc.name,
@@ -821,9 +915,15 @@ export function registerFeatureRoutes(app: Express, deps: FeatureDeps): void {
       }
       const mine = await ScoreModel.findOne({ userId, gameId, difficulty }).lean();
       const mineMetric = (mine?.metric as 'time' | 'score') || GAME_METRICS[gameId];
-      const rivalDoc = await ScoreModel.findOne({ gameId, difficulty, userId: { $ne: userId } })
-        .sort(mineMetric === 'score' ? { bestValue: -1 } : { bestValue: 1, bestMs: 1 })
-        .lean();
+      const rivalDoc = await findRivalDoc(gameId, difficulty, userId, mineMetric);
+      // Rival's name even when she hasn't played yet — the intro screen then
+      // shows «Ол (Айдана): әлі ойнамаған» instead of an anonymous partner.
+      const duelRivalId = resolveDuelRival(userId, await getDuelPair());
+      const rivalName: string | null = rivalDoc
+        ? rivalDoc.name
+        : duelRivalId
+          ? await rivalIdentityName(duelRivalId)
+          : null;
       return res.json({
         summary: {
           gameId,
@@ -832,6 +932,7 @@ export function registerFeatureRoutes(app: Express, deps: FeatureDeps): void {
           best: mine ? mine.bestValue || mine.bestMs || 0 : null,
           plays: mine?.plays ?? 0,
           updatedAt: mine?.updatedAt ?? null,
+          rivalName,
           rival: rivalDoc
             ? {
                 name: rivalDoc.name,
