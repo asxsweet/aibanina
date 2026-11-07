@@ -65,6 +65,17 @@ export interface GameHubProps {
   onHome: () => void;
   /** Bumping this number opens the game picker (the home card's «Ойынды ауыстыру»). */
   pickerSignal?: number;
+  /** «Жарыс» бетінің «Ойнау» басылымы: осы ойынға ауысу (App жібереді). */
+  playRequest?: PlayRequest | null;
+  /** playRequest қабылданғанда App тазартуы үшін. */
+  onPlayRequestDone?: () => void;
+}
+
+/** «Жарыс» → «Ойнау» сұрауы: n — жаңа сұранысты ажырататын нөмір. */
+export interface PlayRequest {
+  gameId: GameId;
+  difficulty: DifficultyName;
+  n: number;
 }
 
 export const GAME_LABELS: Record<GameId, string> = {
@@ -84,6 +95,7 @@ const GAME_ICONS: Record<GameId, React.ElementType> = {
   'love-tower': Layers3,
   match3: Gem,
 };
+export { GAME_ICONS };
 
 // Metric is game-bound (server whitelists per game): score games show raw
 // points, timing games show the faster-the-better value.
@@ -103,6 +115,8 @@ export const GameHub: React.FC<GameHubProps> = ({
   onRewardClaimed,
   onHome,
   pickerSignal,
+  playRequest,
+  onPlayRequestDone,
 }) => {
   const dailyGameId = useDailyGameId(daysPlayed);
 
@@ -115,6 +129,18 @@ export const GameHub: React.FC<GameHubProps> = ({
   useEffect(() => {
     if (pickerSignal && pickerSignal > 0) setPickerOpen(true);
   }, [pickerSignal]);
+
+  // «Жарыс» бетінің «Ойнау» басылымы: ойынды ашып, деңгейді қоямыз.
+  useEffect(() => {
+    if (!playRequest) return;
+    setManualOverride(playRequest.gameId === dailyGameId ? null : playRequest.gameId);
+    onSetDifficulty?.(playRequest.difficulty);
+    setBoardOpen(false);
+    setPickerOpen(false);
+    setRewardNote(null);
+    onPlayRequestDone?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playRequest]);
 
   const activeGameId = manualOverride || dailyGameId;
 
@@ -262,7 +288,19 @@ export const GameHub: React.FC<GameHubProps> = ({
 
       {activeGame}
 
-      {boardOpen && <LeaderboardModal onClose={() => setBoardOpen(false)} />}
+      {boardOpen && (
+        <LeaderboardModal
+          onClose={() => setBoardOpen(false)}
+          currentDifficulty={difficulty}
+          onPlay={(gameId, diff) => {
+            setBoardOpen(false);
+            setPickerOpen(false);
+            setRewardNote(null);
+            onSetDifficulty?.(diff);
+            setManualOverride(gameId === dailyGameId ? null : gameId);
+          }}
+        />
+      )}
     </div>
   );
 };

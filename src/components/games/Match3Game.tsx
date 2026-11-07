@@ -6,9 +6,10 @@
 // striped crystal (cleans its row/column), a run of 5 births a star (wipes
 // everything of that colour), and cross-shaped (T/L) matches make a bomb.
 // Specials detonate each other when swept along. The win is a level goal
-// (score within the move budget); the daily task reads the best cascade
-// combo (`combos`). After 6 idle seconds a possible move pulses as a hint,
-// and a board with zero possible moves reshuffles itself.
+// (score within the difficulty's TIME budget — easy rounds are short, hard
+// rounds get more time for a bigger goal); the daily task reads the best
+// cascade combo (`combos`). After 6 idle seconds a possible move pulses as
+// a hint, and a board with zero possible moves reshuffles itself.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -38,14 +39,16 @@ import type { Board } from './match3Logic';
 const GAME_ID: GameId = 'match3';
 
 interface Preset {
-  moves: number;
+  timeSec: number; // ойнауға бөлінген уақыт (секунд)
   goal: number;
 }
 
+// Жүріс лимитінің орнына деңгей бойынша бөлінген УАҚЫТ: жеңіл деңгейде — аз,
+// қиын деңгейде — көп (мақсат ұпайы да үлкен, сондықтан ойнауға көбірек уақыт).
 const PRESETS: Record<DifficultyName, Preset> = {
-  easy: { moves: 24, goal: 1200 },
-  medium: { moves: 20, goal: 2500 },
-  hard: { moves: 16, goal: 4200 },
+  easy: { timeSec: 60, goal: 1200 },
+  medium: { timeSec: 90, goal: 2500 },
+  hard: { timeSec: 120, goal: 4200 },
 };
 
 interface Popup {
@@ -80,7 +83,7 @@ export const Match3Game: React.FC<GameComponentProps> = ({
   const [boardWin, setBoardWin] = useState<Board>(randomBoard);
   const [uids, setUids] = useState<number[]>(() => Array.from({ length: SIZE * SIZE }, (_, i) => i + 1));
   const [selected, setSelected] = useState<number | null>(null);
-  const [moves, setMoves] = useState(preset.moves);
+  const [timeLeft, setTimeLeft] = useState(preset.timeSec);
   const [score, setScore] = useState(0);
   const [combo, setCombo] = useState(0);
   const [removal, setRemoval] = useState<boolean[] | null>(null);
@@ -96,7 +99,8 @@ export const Match3Game: React.FC<GameComponentProps> = ({
   const boardRef = useRef<Board>(boardWin); // synced each render
   const uidRef = useRef(uids);
   const busyRef = useRef(false);
-  const movesRef = useRef(preset.moves);
+  const timeLeftMsRef = useRef(preset.timeSec * 1000);
+  const swapCountRef = useRef(0); // жасалған ауыстырулар (статистикаға «moves»)
   const scoreRef = useRef(0);
   const comboRef = useRef(0); // live cascade counter
   const bestComboRef = useRef(0);
@@ -122,7 +126,8 @@ export const Match3Game: React.FC<GameComponentProps> = ({
       uidRef.current = Array.from({ length: SIZE * SIZE }, (_, i) => i + 1);
       nextUidRef.current = SIZE * SIZE + 1;
       busyRef.current = false;
-      movesRef.current = presetRef.current.moves;
+      timeLeftMsRef.current = presetRef.current.timeSec * 1000;
+      swapCountRef.current = 0;
       scoreRef.current = 0;
       comboRef.current = 0;
       bestComboRef.current = 0;
@@ -135,7 +140,7 @@ export const Match3Game: React.FC<GameComponentProps> = ({
       setBoardWin(fresh);
       setUids(uidRef.current);
       setSelected(null);
-      setMoves(presetRef.current.moves);
+      setTimeLeft(presetRef.current.timeSec);
       setScore(0);
       setCombo(0);
       setRemoval(null);
@@ -144,6 +149,28 @@ export const Match3Game: React.FC<GameComponentProps> = ({
     }, []),
     onRoundEnd,
   });
+
+  // ── деңгейге бөлінген уақыт өлшегіші (пауза кезінде тоқтайды) ───────────
+  useEffect(() => {
+    if (shell.phase !== 'playing') return undefined;
+    let last = Date.now();
+    const iv = window.setInterval(() => {
+      const now = Date.now();
+      timeLeftMsRef.current = Math.max(0, timeLeftMsRef.current - (now - last));
+      last = now;
+      setTimeLeft(Math.ceil(timeLeftMsRef.current / 1000));
+      // уақыт бітті және каскад ортасында емес — раундты дәл қазір жабамыз
+      if (timeLeftMsRef.current <= 0 && !endedRef.current && !busyRef.current) {
+        endedRef.current = true;
+        shell.endRound(scoreRef.current >= presetRef.current.goal ? 'win' : 'loss', {
+          scoreValue: scoreRef.current,
+          moves: swapCountRef.current,
+          metrics: { combos: bestComboRef.current },
+        });
+      }
+    }, 200);
+    return () => window.clearInterval(iv);
+  }, [shell.phase, shell.endRound]);
 
   // ── ұпай көрсеткіші (жарылған жердің үстінде қалқып шығады) ────────────
   const addPopup = useCallback((cleared: boolean[], gain: number, cascade: number) => {
@@ -249,6 +276,7 @@ export const Match3Game: React.FC<GameComponentProps> = ({
   const trySwap = useCallback(
     (a: number, b: number) => {
       if (!shell.playingRef.current || endedRef.current || busyRef.current) return;
+      if (timeLeftMsRef.current <= 0) return; // уақыт бітті — жаңа жүріс жоқ
       setHint(null);
       setSelected(null);
       const before = boardRef.current;
@@ -285,21 +313,22 @@ export const Match3Game: React.FC<GameComponentProps> = ({
         busyRef.current = false;
         if (!shell.playingRef.current || endedRef.current) return;
 
-        movesRef.current = Math.max(0, movesRef.current - 1);
-        setMoves(movesRef.current);
+        swapCountRef.current += 1;
 
         if (scoreRef.current >= presetRef.current.goal) {
           endedRef.current = true;
           gameAudio.play('win');
           shell.endRound('win', {
             scoreValue: scoreRef.current,
-            moves: presetRef.current.moves - movesRef.current,
+            moves: swapCountRef.current,
             metrics: { combos: bestComboRef.current },
           });
-        } else if (movesRef.current <= 0) {
+        } else if (timeLeftMsRef.current <= 0) {
+          // уақыт каскад барысында бітіп үлгерген — раунд жабылады
           endedRef.current = true;
           shell.endRound('loss', {
             scoreValue: scoreRef.current,
+            moves: swapCountRef.current,
             metrics: { combos: bestComboRef.current },
           });
         } else if (possibleMoves(boardRef.current).length === 0) {
@@ -384,7 +413,7 @@ export const Match3Game: React.FC<GameComponentProps> = ({
     () => [
       'Екі көрші кристалды түртіп ауыстыр (немесе бір кристалды қасындағысына қарай сырғыт) — 3+ бірдей қатар жиналса бәрі жойылады.',
       '4 қатар — Жолақты кристалл (бір жол/баған), 5 қатар — Жұлдыз, Т/Г пішіні — Бомба.',
-      'Қозғалыс аз қалғанда мақсатқа (ұпай жинауға) ұмтыл; каскад көп болса — ұпай да көп.',
+      'Уақыт шектеулі — бөлінген уақыт ішінде мақсат ұпайын жина; каскад көп болса — ұпай да көп. Қиын деңгейде уақыт көбірек, бірақ мақсаты да үлкен.',
     ],
     []
   );
@@ -397,16 +426,15 @@ export const Match3Game: React.FC<GameComponentProps> = ({
       difficulty={difficulty}
       onSetDifficulty={onSetDifficulty}
       mission={{
-        title: `Мақсат: ${preset.goal} ұпай · ${preset.moves} жүріс`,
-        text: 'Ауыстырып қатар құрып, каскад жаса. Бомба мен жұлдызды кристалдар көмегімен де іске асыр.',
+        title: `Мақсат: ${preset.goal} ұпай · ${preset.timeSec} секунд`,
+        text: 'Уақыт бітпей қатар құрып мақсатқа жет. Ауыстырып каскад жаса — бомба мен жұлдызды кристалдар көмегімен де іске асыр.',
         steps,
       }}
       hud={{
         score,
         targetScore: preset.goal,
         lives: undefined,
-        timerSec: undefined,
-        movesLabel: `${moves} жүріс`,
+        timerSec: timeLeft,
         combo,
       }}
       recordsLine={recordsLine}
@@ -473,7 +501,7 @@ export const Match3Game: React.FC<GameComponentProps> = ({
           ))}
         </div>
         <p className="mt-2 text-[10px] text-[var(--text-faint)] flex items-center gap-1 pointer-events-none">
-          <SparkleGlyph size={10} /> {moves} жүріс · мақсат {preset.goal}
+          <SparkleGlyph size={10} /> {timeLeft} с · мақсат {preset.goal}
         </p>
       </div>
     </GameShell>

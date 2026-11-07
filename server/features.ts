@@ -630,6 +630,10 @@ export function registerFeatureRoutes(app: Express, deps: FeatureDeps): void {
     match3: 'score',
   };
 
+  // Endless games have no "win" state — the round always ends when the player
+  // finally misses, so their submitted score may still improve the record.
+  const ENDLESS_GAMES: ReadonlySet<string> = new Set(['love-tower']);
+
   app.post('/api/rounds', async (req: Request, res: Response) => {
     if (!req.auth) return res.status(401).json({ error: 'Қайта кіру керек.' });
     const gameId = str(req.body?.gameId, 20);
@@ -735,7 +739,10 @@ export function registerFeatureRoutes(app: Express, deps: FeatureDeps): void {
       let previous: number | null = null;
       let isRecord = false;
       let bestValue = 0;
-      if (result === 'win') {
+      // A win can set a record; an endless game's round always ends as a
+      // «loss», so its score is record-eligible too (a zero score never is).
+      const recordEligible = result === 'win' || (ENDLESS_GAMES.has(gameId) && candidate > 0);
+      if (recordEligible) {
         const existing = await ScoreModel.findOne({ userId, gameId, difficulty }).lean();
         const prior = existing ? existing.bestValue || existing.bestMs || 0 : null;
         previous = prior;
@@ -757,7 +764,7 @@ export function registerFeatureRoutes(app: Express, deps: FeatureDeps): void {
         );
       } else {
         // A loss still counts as a play (for the "games played" stat), but it
-        // can never set the record.
+        // can never set the record (endless games are handled above).
         await ScoreModel.updateOne(
           { userId, gameId, difficulty },
           { $inc: { plays: 1 }, $set: { name: await getDisplayName(req.auth) } },

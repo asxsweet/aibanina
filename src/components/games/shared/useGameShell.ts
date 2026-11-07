@@ -36,6 +36,10 @@ export interface UseGameShellOptions {
   onBeforeStart?: () => void;
   /** Fired once when the round ends, for stardust / daily tasks. */
   onRoundEnd?: (info: { outcome: GameOutcome; bonus: boolean; metrics: RoundMetrics }) => void;
+  /** Endless rounds (love-tower) always end as a «loss», yet the score can
+   *  still be a personal record — this unlocks the record badge + fanfare
+   *  for loss endings (the server keeps the same whitelist for the game). */
+  recordOnLoss?: boolean;
 }
 
 export interface ShellApi {
@@ -230,6 +234,9 @@ export function useGameShell(options: UseGameShellOptions): ShellApi {
         score: scoreValue,
         ...(payload.metrics || {}),
       };
+      // Шексіз ойындар «loss» болып бітсе де — рекордқа үміткер (сервер де
+      // сол ойындар үшін loss раундта рекордты жаңартады).
+      const recordEligible = endOutcome === 'win' || optsRef.current.recordOnLoss === true;
 
       setOutcome(endOutcome);
       setPhase('over');
@@ -275,7 +282,7 @@ export function useGameShell(options: UseGameShellOptions): ShellApi {
           const rivalValue = res.rival?.bestValue ?? null;
           return {
             ...prev,
-            isNewRecord: endOutcome === 'win' && res.isRecord,
+            isNewRecord: recordEligible && res.isRecord,
             previousBest: res.previousBest !== null ? fmtHeadline(metric, res.previousBest) : prev.previousBest,
             rivalBest: rivalValue !== null ? fmtHeadline(metric, rivalValue) : prev.rivalBest,
             gap: rivalValue !== null ? gapText(metric, metricValue, rivalValue) : prev.gap,
@@ -288,7 +295,7 @@ export function useGameShell(options: UseGameShellOptions): ShellApi {
               : [],
           };
         });
-        if (endOutcome === 'win' && res.isRecord) {
+        if (recordEligible && res.isRecord) {
           gameAudio.play('record');
         }
       });

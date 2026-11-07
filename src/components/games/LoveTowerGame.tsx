@@ -4,10 +4,14 @@
 // drops it, the overlap with the tower top decides the new width, and the
 // shaved-off slither falls away as a little chunk. ≥98% overlap is a Perfect
 // Drop (combo chain, bonus points, sparkle sfx). The camera rises with the
-// tower and the backdrop drifts ground → clouds → sky. Merê targets per
-// difficulty; the daily task counts `perfects`.
+// tower and the backdrop drifts ground → clouds → sky. ШЕКСІЗ режим:
+// difficulty only sets speed and the starting width — there is no floor
+// target, the round ends only when a block finally misses. The personal
+// record hangs above the field the whole time, and beating it mid-run
+// triggers a «ЖАҢА РЕКОРД!» flash. The daily task counts `perfects`.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Trophy } from 'lucide-react';
 import { GameShell } from './shared/GameShell';
 import { useGameShell } from './shared/useGameShell';
 import { BlockGlyph, SparkleGlyph } from './shared/art';
@@ -15,23 +19,34 @@ import type { GameComponentProps, GameId } from '../gameTypes';
 import type { DifficultyName } from '../../utils/constellationUtils';
 import { gameAudio, buzz } from '../../utils/gameSound';
 import { useRafLoop } from '../../utils/gameLoop';
+import { fetchRoundSummary } from '../../utils/records';
 
 const GAME_ID: GameId = 'love-tower';
 
 interface Preset {
-  targetFloors: number;
   speedPx: number; // base glide speed (grows a touch each floor)
   blockW: number; // starting width, % of the field
 }
 
+// Шексіз режим: деңгей тек жылдамдық пен бастапқы енді қойяды — мақсатты
+// қабат саны ЖОҚ. Ойыншы қателеспейінше мұнара өсе береді.
 const PRESETS: Record<DifficultyName, Preset> = {
-  easy: { targetFloors: 10, speedPx: 90, blockW: 60 },
-  medium: { targetFloors: 14, speedPx: 125, blockW: 52 },
-  hard: { targetFloors: 18, speedPx: 165, blockW: 44 },
+  easy: { speedPx: 90, blockW: 60 },
+  medium: { speedPx: 125, blockW: 52 },
+  hard: { speedPx: 165, blockW: 44 },
 };
 
+const SPEED_GROWTH_CAP = 140; // px/s — қабат сайынғы жылдамдық өсімінің төбі
 const BLOCK_H = 30; // px
 const PERFECT_PCT = 98;
+
+const fmtInt = (n: number): string => {
+  try {
+    return Math.round(n).toLocaleString('kk-KZ');
+  } catch {
+    return String(Math.round(n));
+  }
+};
 
 const GROUND = 26; // px — жерден блокқа дейін
 // биік қабаттарда көрінетін жұлдыздар: [left%, top%, size px, delay s]
@@ -78,6 +93,10 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
   const [perfectFlash, setPerfectFlash] = useState(0);
   const [skyStage, setSkyStage] = useState(0); // 0 ground · 1 clouds · 2 sky
   const [fieldH, setFieldH] = useState(380);
+  // жеке рекорд (серверде сақталған) + оны ойын ортасында басып озу тойы
+  const [myBest, setMyBest] = useState<number | null>(null);
+  const [recordBeaten, setRecordBeaten] = useState(false);
+  const [recordFlash, setRecordFlash] = useState(0);
 
   // ── live data (refs) ───────────────────────────────────────────────────
   const fieldRef = useRef<HTMLDivElement>(null);
@@ -91,6 +110,8 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
   const perfectsRef = useRef(0);
   const widthRef = useRef(preset.blockW);
   const endedRef = useRef(false);
+  const bestRef = useRef<number | null>(null); // ойыншының жеке рекорды (ұпай)
+  const recordBeatenRef = useRef(false);
   const presetRef = useRef(preset);
   presetRef.current = preset;
   const chunkKeyRef = useRef(1);
@@ -117,6 +138,7 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
       perfectsRef.current = 0;
       widthRef.current = p.blockW;
       endedRef.current = false;
+      recordBeatenRef.current = false;
       chunkKeyRef.current = 1;
       setFloors(0);
       setScore(0);
@@ -126,7 +148,10 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
       setChunks([]);
       setPerfectFlash(0);
       setSkyStage(0);
+      setRecordBeaten(false);
+      setRecordFlash(0);
     }, []),
+    recordOnLoss: true, // шексіз режим: раунд «loss» болып бітсе де — рекордқа үміткер
     onRoundEnd,
   });
 
@@ -137,7 +162,7 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
       const field = fieldRef.current;
       const p = presetRef.current;
       const fieldW = field?.clientWidth ?? 340;
-      const speed = (p.speedPx + floorsRef.current * 4) * (fieldW / 340); // px/s
+      const speed = (p.speedPx + Math.min(floorsRef.current * 4, SPEED_GROWTH_CAP)) * (fieldW / 340); // px/s
       xRef.current += (dirRef.current * speed * dtMs) / 1000 / (fieldW / 100);
       const maxX = 97 - widthRef.current;
       if (xRef.current < 2) {
@@ -153,6 +178,36 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
   );
 
   useRafLoop(shell.phase === 'playing', step);
+
+  // ── жеке рекорд: серверден оқу ──────────────────────────────────────────
+  useEffect(() => {
+    let cancelled = false;
+    fetchRoundSummary(GAME_ID, difficulty).then((s) => {
+      if (cancelled || !s || s.best === null) return;
+      // тек жоғары қарай: жаңа раундтың нәтижесі серверге жетуінен бұрын да
+      // көрсеткіш дұрыс тұрады
+      if (s.best > (bestRef.current ?? 0)) {
+        bestRef.current = s.best;
+        setMyBest(s.best);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [difficulty]);
+
+  // раунд бітсе де рекорд көрсеткішін бірден көтереміз (сервер растамай-ақ,
+  // «Қайта ойнау» басқаннан кейінгі раұнд дұрыс көрсету үшін)
+  const recordPhaseRef = useRef(shell.phase);
+  useEffect(() => {
+    if (recordPhaseRef.current === 'playing' && shell.phase === 'over') {
+      if (scoreRef.current > (bestRef.current ?? 0)) {
+        bestRef.current = scoreRef.current;
+        setMyBest(scoreRef.current);
+      }
+    }
+    recordPhaseRef.current = shell.phase;
+  }, [shell.phase]);
 
   // Алаң биіктігін өлшеу — камера мұнараның төбін көрінетін жерде ұстау үшін керек
   useEffect(() => {
@@ -223,6 +278,16 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
     setScore(scoreRef.current);
     setCombo(comboRef.current > 1 ? comboRef.current : 0);
 
+    // рекордты басып озған сәт — ойын ортасында тойланады (бір раұндта бір рет)
+    if (!recordBeatenRef.current && (bestRef.current ?? 0) > 0 && scoreRef.current > bestRef.current!) {
+      recordBeatenRef.current = true;
+      setRecordBeaten(true);
+      setRecordFlash((f) => f + 1);
+      gameAudio.play('record');
+      buzz([20, 40, 20]);
+      window.setTimeout(() => setRecordFlash(0), 1600);
+    }
+
     // кесілген бөлшек ТҮСКЕН блоктың дәл сол жағынан құлайды
     if (top && !isPerfect && pctOverlap < 100) {
       const cutLeft = x < top.x;
@@ -235,14 +300,8 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
       }
     }
 
-    if (floorsRef.current >= presetRef.current.targetFloors && !endedRef.current) {
-      endedRef.current = true;
-      shell.endRound('win', {
-        scoreValue: scoreRef.current,
-        metrics: { perfects: perfectsRef.current },
-      });
-      return;
-    }
+    // Шексіз режим — мақсатты қабат саны жоқ: ойын тек мұнарадан тыс
+    // түскенде (жоғарыдағы miss тармағында) бітеді.
 
     // келесі қабат үшін ілулі блокты қайта қою
     xRef.current = 2;
@@ -279,7 +338,7 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
     () => [
       'Блок сырғып келеді. Экранды бір бас: блок мұнараның басына түседі.',
       '98%-тен дәл түссе — Perfect Drop: комбо мен үлкен бонус. Болмаса блок жіңішкереді.',
-      'Мұнарадан тыс түскен блок ойынды аяқтайды — таймингті сақта!',
+      'Мұнарадан тыс түскен блок ойынды аяқтайды. Жоғарыдағы рекордты басып озсаң — «ЖАҢА РЕКОРД!» деп тойланады.',
     ],
     []
   );
@@ -296,8 +355,8 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
       difficulty={difficulty}
       onSetDifficulty={onSetDifficulty}
       mission={{
-        title: `${preset.targetFloors} қабат мұнара`,
-        text: 'Екеуің үшін бірге мұнараны көтер! Дәл түсіру Perfect Drop комбинеретінін, ұпай — рекордын құрайды.',
+        title: 'Шексіз мұнара — қанша қабат көтересің?',
+        text: 'Шектеу жоқ: қателеспейінше блок-блокпен мұнара өсе береді. Дәл түсіру Perfect Drop комбоын жинайды, ұпай жинаған сайын рекорд жаңарады.',
         steps,
       }}
       hud={{
@@ -324,6 +383,16 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
         className="absolute inset-0 overflow-hidden game-field cursor-pointer outline-none"
         style={{ touchAction: 'none' }}
       >
+        {/* жеке рекорд — ойын ортасында әрқашан көрінеді */}
+        <div className="absolute top-2 left-1/2 -translate-x-1/2 z-10 pointer-events-none flex items-center gap-1.5 px-3 py-1 rounded-full bg-[var(--bg-elevated)]/85 border border-[var(--border)] shadow-sm text-[10px] font-bold tabular-nums text-[var(--text-secondary)]">
+          <Trophy className={`w-3 h-3 ${recordBeaten ? 'text-[var(--accent)]' : 'text-[var(--accent-2)]'}`} />
+          {recordBeaten ? (
+            <span className="text-[var(--accent)]">ЖАҢА РЕКОРД · {fmtInt(score)}</span>
+          ) : (
+            <span>Рекорд: {myBest !== null ? fmtInt(myBest) : '—'}</span>
+          )}
+        </div>
+
         {/* backdrop layers: ground → clouds → sky (параллакс: камерамен баяу жылжиды) */}
         <div
           className="absolute inset-0 pointer-events-none transition-opacity duration-1000"
@@ -430,6 +499,15 @@ export const LoveTowerGame: React.FC<GameComponentProps> = ({
           <div key={perfectFlash} className="absolute inset-0 pointer-events-none flex items-center justify-center">
             <span className="anim-combo-pop text-[var(--accent)] font-black text-xl drop-shadow-[0_0_16px_var(--accent-glow-strong)] flex items-center gap-1.5">
               <SparkleGlyph size={18} /> PERFECT!
+            </span>
+          </div>
+        )}
+
+        {/* рекорд жаңарып қалғандағы үлкен тойланыс */}
+        {recordFlash > 0 && (
+          <div key={`rec-${recordFlash}`} className="absolute inset-0 z-10 pointer-events-none flex items-center justify-center">
+            <span className="anim-combo-pop text-[var(--accent)] font-black text-2xl drop-shadow-[0_0_18px_var(--accent-glow-strong)] flex items-center gap-2">
+              <Trophy size={24} /> ЖАҢА РЕКОРД!
             </span>
           </div>
         )}

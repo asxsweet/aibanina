@@ -50,7 +50,8 @@ import { THEME_META } from './data/themes';
 
 import { NightSky } from './components/NightSky';
 import { Header } from './components/Header';
-import { GameHub, GAME_LABELS, useDailyGameId } from './components/GameHub';
+import { GameHub, GAME_LABELS, useDailyGameId, type PlayRequest } from './components/GameHub';
+import type { GameId } from './components/gameTypes';
 import { ConstellationMap } from './components/ConstellationMap';
 import { MessageCard } from './components/MessageCard';
 import { DailyQuestionModal } from './components/DailyQuestionModal';
@@ -149,6 +150,8 @@ export default function App() {
   // raises the GameHub picker when she taps «Ойынды ауыстыру» at home.
   const dailyGameId = useDailyGameId(progress.daysPlayed);
   const [gamePickerSignal, setGamePickerSignal] = useState<number>(0);
+  // «Жарыс» бетіндегі «Ойнау» сұрауы: GameHub сол ойынға ауысып, деңгейді қояды.
+  const [playRequest, setPlayRequest] = useState<PlayRequest | null>(null);
 
   // Keep a light-weight copy of the shared gallery around so the
   // constellation map can show a camera badge on days that have a linked
@@ -704,6 +707,14 @@ export default function App() {
     }));
   };
 
+  // «Жарыс» бетінің «Ойнау» басылымы: ойын бетіне ауысып, сол ойынды ашамыз.
+  const handlePlayFromDuel = (gameId: GameId, nextDifficulty: DifficultyName) => {
+    setIsLeaderboardOpen(false);
+    handleSetDifficulty(nextDifficulty);
+    setActiveTab('game');
+    setPlayRequest({ gameId, difficulty: nextDifficulty, n: Date.now() });
+  };
+
   // Update profile (name / bio) — persists to the auth store and refreshes
   // the current session so the new name shows everywhere immediately.
   const handleUpdateProfile = async (updates: { name: string; bio: string }) => {
@@ -1009,6 +1020,8 @@ export default function App() {
             onHome={() => setActiveTab('all')}
             daysPlayed={progress.daysPlayed}
             pickerSignal={gamePickerSignal}
+            playRequest={playRequest}
+            onPlayRequestDone={() => setPlayRequest(null)}
           />
         )}
 
@@ -1168,7 +1181,13 @@ export default function App() {
       )}
 
       {/* Fastest-win records */}
-      {isLeaderboardOpen && <LeaderboardModal onClose={() => setIsLeaderboardOpen(false)} />}
+      {isLeaderboardOpen && (
+        <LeaderboardModal
+          onClose={() => setIsLeaderboardOpen(false)}
+          currentDifficulty={difficulty}
+          onPlay={handlePlayFromDuel}
+        />
+      )}
       {isIdeasOpen && <LoveIdeasModal onClose={() => setIsIdeasOpen(false)} />}
 
       {/* A surprise tied to today's calendar date */}
