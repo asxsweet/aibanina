@@ -5,11 +5,12 @@
 // visibly reverts; a valid swap can birth specials: a run of 4 becomes a
 // striped crystal (cleans its row/column), a run of 5 births a star (wipes
 // everything of that colour), and cross-shaped (T/L) matches make a bomb.
-// Specials detonate each other when swept along. The win is a level goal
-// (score within the difficulty's TIME budget — easy rounds are short, hard
-// rounds get more time for a bigger goal); the daily task reads the best
-// cascade combo (`combos`). After 6 idle seconds a possible move pulses as
-// a hint, and a board with zero possible moves reshuffles itself.
+// Specials detonate each other when swept along. The round never stops at the
+// goal: it only ends when the TIME budget runs out (win = goal reached by
+// then), and the score — hence the record — keeps growing the whole time; the
+// daily task reads the best cascade combo (`combos`). After 6 idle seconds a
+// possible move pulses as a hint, and a board with zero possible moves
+// reshuffles itself.
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
@@ -19,6 +20,7 @@ import { CrystalGlyph, SparkleGlyph } from './shared/art';
 import type { GameComponentProps, GameId } from '../gameTypes';
 import type { DifficultyName } from '../../utils/constellationUtils';
 import { gameAudio, buzz } from '../../utils/gameSound';
+import { fetchRoundSummary } from '../../utils/records';
 import {
   SIZE,
   adjacent,
@@ -107,6 +109,10 @@ export const Match3Game: React.FC<GameComponentProps> = ({
   const endedRef = useRef(false);
   const nextUidRef = useRef(SIZE * SIZE + 1);
   const popupIdRef = useRef(1);
+  // Бір раундда бір рет көрсетілетін қуаныш жарлықтары:
+  const goalShownRef = useRef(false);   // мақсат ұпайына жеттік
+  const recordShownRef = useRef(false); // жеке рекордты асып түстік
+  const myBestRef = useRef(0);          // қазіргі деңгейдегі жеке рекорд
   const cellEls = useRef<Array<HTMLButtonElement | null>>([]);
   const dragRef = useRef<{ i: number; x: number; y: number; done: boolean } | null>(null);
   const presetRef = useRef(preset);
@@ -132,6 +138,8 @@ export const Match3Game: React.FC<GameComponentProps> = ({
       comboRef.current = 0;
       bestComboRef.current = 0;
       endedRef.current = false;
+      goalShownRef.current = false;
+      recordShownRef.current = false;
       setIntro(true);
       setFalls(zeros());
       setBorn(falses());
@@ -188,6 +196,28 @@ export const Match3Game: React.FC<GameComponentProps> = ({
     setPopups((cur) => [...cur.slice(-4), p]);
     window.setTimeout(() => setPopups((cur) => cur.filter((x) => x.id !== id)), 900);
   }, []);
+
+  // Ортаға шығатын қуаныш баннері («Мақсат асылды ✨» / «ЖАҢА РЕКОРД! ⭐»)
+  const addBanner = useCallback((text: string) => {
+    const id = popupIdRef.current++;
+    const p: Popup = { id, left: 50, top: 34, text, big: true };
+    setPopups((cur) => [...cur.slice(-4), p]);
+    window.setTimeout(() => setPopups((cur) => cur.filter((x) => x.id !== id)), 1200);
+  }, []);
+
+  // Жеке рекорд — мақсат ұпайын өту барысында «рекорд өсе беретін» жағдайды
+  // (реалды) тексеру үшін: әр раунд біткенде (idle) жаңартылады.
+  useEffect(() => {
+    if (shell.phase !== 'idle') return undefined;
+    let cancelled = false;
+    fetchRoundSummary(GAME_ID, difficulty).then((s) => {
+      if (cancelled) return;
+      myBestRef.current = s?.best ?? 0;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [difficulty, shell.phase]);
 
   // ── cascade engine ─────────────────────────────────────────────────────
   const settle = useCallback(async (swapCells: number[]): Promise<void> => {
@@ -315,18 +345,20 @@ export const Match3Game: React.FC<GameComponentProps> = ({
 
         swapCountRef.current += 1;
 
-        if (scoreRef.current >= presetRef.current.goal) {
-          endedRef.current = true;
-          gameAudio.play('win');
-          shell.endRound('win', {
-            scoreValue: scoreRef.current,
-            moves: swapCountRef.current,
-            metrics: { combos: bestComboRef.current },
-          });
-        } else if (timeLeftMsRef.current <= 0) {
+        // Раунд мақсат ұпайын өтсе де ТОҚТАМАЙДЫ — уақыт біткенше ойнай бер,
+        // ұпай (және оның ішіндегі рекорд) артыла береді. Тек жарлық көрсетеміз.
+        if (!goalShownRef.current && scoreRef.current >= presetRef.current.goal) {
+          goalShownRef.current = true;
+          addBanner('Мақсат асылды! ✨');
+        }
+        if (myBestRef.current > 0 && !recordShownRef.current && scoreRef.current > myBestRef.current) {
+          recordShownRef.current = true;
+          addBanner('ЖАҢА РЕКОРД! ⭐');
+        }
+        if (timeLeftMsRef.current <= 0) {
           // уақыт каскад барысында бітіп үлгерген — раунд жабылады
           endedRef.current = true;
-          shell.endRound('loss', {
+          shell.endRound(scoreRef.current >= presetRef.current.goal ? 'win' : 'loss', {
             scoreValue: scoreRef.current,
             moves: swapCountRef.current,
             metrics: { combos: bestComboRef.current },
@@ -344,7 +376,7 @@ export const Match3Game: React.FC<GameComponentProps> = ({
       })();
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [shell.playingRef, shell.endRound, settle, slideCells, resetCells]
+    [shell.playingRef, shell.endRound, settle, slideCells, resetCells, addBanner]
   );
 
   // Түрту: бірінші кристалды белгілеп, екіншісін түртсе — екеуі ауысады
@@ -413,7 +445,7 @@ export const Match3Game: React.FC<GameComponentProps> = ({
     () => [
       'Екі көрші кристалды түртіп ауыстыр (немесе бір кристалды қасындағысына қарай сырғыт) — 3+ бірдей қатар жиналса бәрі жойылады.',
       '4 қатар — Жолақты кристалл (бір жол/баған), 5 қатар — Жұлдыз, Т/Г пішіні — Бомба.',
-      'Уақыт шектеулі — бөлінген уақыт ішінде мақсат ұпайын жина; каскад көп болса — ұпай да көп. Қиын деңгейде уақыт көбірек, бірақ мақсаты да үлкен.',
+      'Уақыт шектеулі — уақыт таусылғанша ойнай бер: мақсат ұпайына жетсең де раунд аяқталмайды, ұпайың өсе береді. Рекордың — уақыт біткендегі қорытынды ұпай. Қиын деңгейде уақыт көбірек, мақсаты да үлкен.',
     ],
     []
   );
@@ -426,8 +458,8 @@ export const Match3Game: React.FC<GameComponentProps> = ({
       difficulty={difficulty}
       onSetDifficulty={onSetDifficulty}
       mission={{
-        title: `Мақсат: ${preset.goal} ұпай · ${preset.timeSec} секунд`,
-        text: 'Уақыт бітпей қатар құрып мақсатқа жет. Ауыстырып каскад жаса — бомба мен жұлдызды кристалдар көмегімен де іске асыр.',
+        title: `Уақыт: ${preset.timeSec} с · мақсат: ${preset.goal}+ ұпай`,
+        text: 'Уақыт біткенше қатар құрып ұпай жинай бер — мақсатқа жетсең раунд аяқталмайды, ұпайың артыла береді. Рекордың — уақыт біткендегі қорытынды ұпайың.',
         steps,
       }}
       hud={{
@@ -501,7 +533,8 @@ export const Match3Game: React.FC<GameComponentProps> = ({
           ))}
         </div>
         <p className="mt-2 text-[10px] text-[var(--text-faint)] flex items-center gap-1 pointer-events-none">
-          <SparkleGlyph size={10} /> {timeLeft} с · мақсат {preset.goal}
+          <SparkleGlyph size={10} /> {timeLeft} с ·{' '}
+          {score >= preset.goal ? 'мақсат асылды — ойнай бер ✨' : `мақсат ${preset.goal}`}
         </p>
       </div>
     </GameShell>

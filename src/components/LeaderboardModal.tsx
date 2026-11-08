@@ -310,10 +310,10 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
   const leadDiff = Math.abs(tally.myWins - tally.rivalWins);
   const statusLine =
     tally.myWins > tally.rivalWins
-      ? `Жалпы есепте алдасың 👑 · Ол ${leadDiff} рекордпен қуып келеді`
+      ? `Сен қазір алдыдасың👑 · Ол ${leadDiff} рекордпен қуып келеді`
       : tally.rivalWins > tally.myWins
-        ? `Жалпы есепте арттаң · тағы ${leadDiff} рекорд алсаң теңелесің`
-        : 'Жалпы есеп тең 👑 · кім тезірек алдырады?';
+        ? `Сен қазір қалып бара жатсың · тағы ${leadDiff}рет жеңсең қуып жетесің`
+        : 'Екеуің тең болып тұрсыңдар👑 · Кім бірінші алдыға шығады екен?';
 
   const renderPlayButton = (g: GameId, d: DifficultyName, small: boolean) =>
     onPlay && (
@@ -499,7 +499,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                       >
                         {header}
                         <p className="text-[10px] text-[var(--text-muted)] leading-relaxed mb-2">
-                          Әлі ешкім ойнамаған. Алғашқы рекордты қой!
+                          Әлі ешкім ойнамаған. Алғашқы рекордыңды қой!
                         </p>
                         {renderPlayButton(g, diff, true)}
                       </div>
@@ -652,7 +652,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                             {!m && !t ? (
                               <div className="flex items-center justify-between gap-2 mt-2">
                                 <p className="text-[10px] text-[var(--text-muted)] leading-snug">
-                                  Әлі ешкім ойнамаған. Алғашқы рекордты қой!
+                                  Әлі ешкім ойнамаған. Алғашқы рекордыңды қой!
                                 </p>
                                 {renderPlayButton(g, r.d, true)}
                               </div>
