@@ -572,11 +572,32 @@ export const DAILY_MESSAGES: DailyMessage[] = [
     questionCategory: 'relationship',  // favorites | memory | relationship | future | fun
   },
    {
-    id: 71,
-    dayNumber: 71,
+    id: 75,
+    dayNumber: 75,
     title: 'Люблю',
     text: 'Сен менің - өмірімсің,бақытымсың және тағдырымсың ',
     hint: 'Шумақтардан. '
+  },
+  {
+    id: 76,
+    dayNumber: 76,
+    question: '«Әңгімелескен кезде қандай тақырыптағы темалар ыңғайсыздық тудырады?»',   // ← міндетті
+    questionHint: 'Ашық ойыңды жаз',          // міндетті емес
+    questionCategory: 'relationship',  // favorites | memory | relationship | future | fun
+  },
+   {
+    id: 75,
+    dayNumber: 75,
+    question: '«Ұйықтар алдында көбінесе не нірсе ойлайсың?»',   // ← міндетті
+    questionHint: 'Ашық ойыңды жаз',          // міндетті емес
+    questionCategory: 'relationship',  // favorites | memory | relationship | future | fun
+  },
+   {
+    id: 76,
+    dayNumber: 76,
+    question: '«Менімен сөйлесіп бастағалы өзіңнен қандай өзгерістер байқадың?»',   // ← міндетті
+    questionHint: 'Өзгерістерді жаз',          // міндетті емес
+    questionCategory: 'relationship',  // favorites | memory | relationship | future | fun
   },
   
   
