@@ -606,30 +606,24 @@ export const DAILY_MESSAGES: DailyMessage[] = [
     questionHint: 'Немесе қорқасың?',          // міндетті емес
     questionCategory: 'relationship',  // favorites | memory | relationship | future | fun
   },
-  {
+ 
+   {
     id: 78,
     dayNumber: 78,
-    title: 'Мына күнді қатты күтемін',
-    text: 'Экран арқылы қайырлы түн тілейтін уақытта кетеді ,өйткені кейін бір біріміздің жанымызда ұйықтай аламыз! ',
-    hint: 'Либо ол күні қайырлы түн деп өзіңе айта аламын!'
-  },
-   {
-    id: 79,
-    dayNumber: 79,
     question: '«Біздің қарым қатынаста өзің өкінетін тұстар бар ма?»',   // ← міндетті
     questionHint: 'Қап әттеген ай деп қалған кездер',          // міндетті емес
     questionCategory: 'relationship',  // favorites | memory | relationship | future | fun
   },
    {
-    id: 80,
-    dayNumber: 80,
+    id: 79,
+    dayNumber: 79,
     title: 'Сен өте әдемісің....',
     text: 'Жүзі Алтайдың айындай,көзі құралайдай,жүзі атқан таңдай ',
     hint: 'Либо ол күні қайырлы түн деп өзіңе айта аламын!'
   },
    {
-    id: 81,
-    dayNumber: 81,
+    id: 80,
+    dayNumber: 80,
     question: '«Менің қандай іс әрекетімнен саған деген махаббатты сезесің?»',   // ← міндетті
     questionHint: 'Либо жылулықты?',          // міндетті емес
     questionCategory: 'relationship',  // favorites | memory | relationship | future | fun
