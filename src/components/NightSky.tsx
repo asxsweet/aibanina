@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+﻿import React, { useEffect, useRef } from 'react';
 import type { ThemeName } from '../data/themes';
 import { startAtmosphere } from '../utils/atmosphere.js';
 
@@ -45,7 +45,26 @@ const NaturalThemeArt: React.FC<{ theme: ThemeName }> = ({ theme }) => {
   if (theme === 'galaxy') return <svg {...common}><defs><radialGradient id="planet"><stop stopColor="#d7b8ff"/><stop offset="1" stopColor="#6d4fb5"/></radialGradient></defs><g className="natural-float"><circle cx="690" cy="150" r="70" fill="url(#planet)" opacity=".55"/><ellipse cx="690" cy="150" rx="125" ry="28" fill="none" stroke="#dfcfff" strokeWidth="7" opacity=".35" transform="rotate(-12 690 150)"/></g><path d="M70 520Q340 380 650 540T1000 470" fill="none" stroke="#a17cff" strokeWidth="30" opacity=".06"/></svg>;
   if (theme === 'gold') return <svg {...common}><defs><radialGradient id="goldGlow"><stop stopColor="#ffd96a"/><stop offset="1" stopColor="#ffd96a" stopOpacity="0"/></radialGradient></defs><circle cx="500" cy="270" r="190" fill="url(#goldGlow)" opacity=".16"/><g transform="translate(500 590)" fill="#f0c75e" opacity=".3"><path d="M-95 0L-115-95-55-48 0-120 55-48 115-95 95 0Z"/><rect x="-95" y="8" width="190" height="26" rx="6"/><circle cx="-115" cy="-98" r="9"/><circle cx="0" cy="-124" r="10"/><circle cx="115" cy="-98" r="9"/></g><path d="M0 650H1000" stroke="#f0c75e" strokeWidth="2" opacity=".25"/></svg>;
   if (theme === 'sakura') return <svg {...common}><g fill="none" stroke="#865267" strokeWidth="12" opacity=".2" className="natural-float"><path d="M0 170Q180 100 340 210"/><path d="M1000 120Q820 80 680 215"/></g><g fill="#e89ab7" opacity=".28"><circle cx="220" cy="150" r="15"/><circle cx="270" cy="174" r="13"/><circle cx="770" cy="135" r="16"/><circle cx="715" cy="176" r="12"/></g><path d="M0 580Q180 550 360 580T720 575T1000 580V700H0Z" fill="#cf9fbd" opacity=".18"/><g fill="none" stroke="#fff" opacity=".25" className="natural-pulse"><ellipse cx="240" cy="590" rx="70" ry="14"/><ellipse cx="720" cy="620" rx="55" ry="11"/></g></svg>;
-  if (theme === 'ocean') return <svg {...common}><defs><linearGradient id="sea" y2="1"><stop stopColor="#5fd8e8" stopOpacity=".18"/><stop offset="1" stopColor="#06243a" stopOpacity=".7"/></linearGradient></defs><path d="M0 440Q120 390 240 440T480 440T720 440T1000 440V700H0Z" fill="url(#sea)" className="natural-drift"/><g fill="none" stroke="#9befff" opacity=".15"><path d="M80 560q45-50 90 0t90 0"/><path d="M700 520q45-50 90 0t90 0"/></g></svg>;
+  if (theme === 'ocean') return <svg {...common}><defs>
+    <linearGradient id="sea" y2="1"><stop stopColor="#5fd8e8" stopOpacity=".18"/><stop offset="1" stopColor="#06243a" stopOpacity=".7"/></linearGradient>
+    <linearGradient id="sand" y2="1"><stop stopColor="#d8c48c" stopOpacity=".6"/><stop offset="1" stopColor="#7a6a44" stopOpacity=".9"/></linearGradient>
+    <radialGradient id="anemBase"><stop stopColor="#ff8fcb"/><stop offset="1" stopColor="#a02a6c"/></radialGradient>
+  </defs>
+  <path d="M0 440Q120 390 240 440T480 440T720 440T1000 440V700H0Z" fill="url(#sea)" className="natural-drift"/>
+  <g fill="none" stroke="#9befff" opacity=".15"><path d="M80 560q45-50 90 0t90 0"/><path d="M700 520q45-50 90 0t90 0"/></g>
+  <path d="M0 520Q120 470 240 515T480 505T720 515T1000 495V700H0Z" fill="#0b3d57" opacity=".8"/>
+  <path d="M0 580Q250 552 500 576T1000 566V700H0Z" fill="url(#sand)"/>
+  <path d="M668 590Q684 524 730 532Q784 542 792 590Z" fill="#2b5e6c"/><path d="M706 538q14-14 34-6" stroke="#4d8d99" strokeWidth="5" strokeLinecap="round" fill="none"/>
+  <g stroke="#ff6f91" strokeWidth="13" strokeLinecap="round" fill="none"><path d="M300 592V492M300 540L264 496M300 526L340 480M264 496L250 452M264 496L284 460M340 480L330 444M340 480L364 456"/></g>
+  <g fill="#ffd0dc"><circle cx="250" cy="450" r="6"/><circle cx="284" cy="458" r="6"/><circle cx="330" cy="442" r="6"/><circle cx="364" cy="454" r="6"/></g>
+  <g fill="#ffd54a"><rect x="388" y="540" width="20" height="52" rx="10"/><rect x="412" y="520" width="20" height="72" rx="10"/><rect x="364" y="558" width="18" height="34" rx="9"/></g>
+  <g fill="#c99a12"><ellipse cx="398" cy="542" rx="7" ry="3"/><ellipse cx="422" cy="522" rx="7" ry="3"/><ellipse cx="373" cy="560" rx="6" ry="3"/></g>
+  <ellipse cx="480" cy="584" rx="48" ry="14" fill="url(#anemBase)"/>
+  <ellipse cx="592" cy="572" rx="54" ry="30" fill="#e8a0c8"/><g stroke="#b95a96" strokeWidth="4" strokeLinecap="round" fill="none"><path d="M556 568q14-12 28 0t28 0t28 0"/><path d="M560 582q14-12 28 0t28 0t24 0"/><path d="M572 556q12-9 24 0t24 0"/></g>
+  <path d="M228 592L170 484Q228 432 288 484Z" fill="#ff9a5a" opacity=".92"/><g stroke="#c4631f" strokeWidth="3" strokeLinecap="round"><path d="M228 590V450M228 590L190 478M228 590L266 478"/></g>
+  <g stroke="#b58cff" strokeWidth="11" strokeLinecap="round" fill="none"><path d="M760 592V512M760 548L730 510M760 536L792 498M730 510L722 480M792 498L802 468"/></g>
+  <path d="M548 592l8-18 18 4-14 12 8 18-16-10-16 10 8-18-14-12 18-4z" fill="#ff8a5a" transform="translate(40 -12) scale(.9)"/>
+</svg>;
   if (theme === 'lavender') return <svg {...common}><g stroke="#76569a" strokeWidth="4" opacity=".25"><path d="M100 700Q130 500 110 350M170 700Q185 510 160 390M850 700Q820 500 850 360M920 700Q890 520 920 400"/></g><g fill="#9e7ac4" opacity=".34"><circle cx="112" cy="360" r="13"/><circle cx="102" cy="390" r="12"/><circle cx="158" cy="405" r="13"/><circle cx="850" cy="370" r="14"/><circle cx="918" cy="410" r="13"/></g></svg>;
   if (theme === 'sunset') return <svg {...common}><circle cx="500" cy="270" r="105" fill="#ffd08a" opacity=".5"/><path d="M0 590Q170 500 350 590Q550 430 740 590Q870 510 1000 580V700H0Z" fill="#2d183a" opacity=".62"/><g fill="none" stroke="#34203c" strokeWidth="5" opacity=".55"><path d="M160 230q20-18 40 0q20-18 40 0M760 190q18-15 36 0q18-15 36 0"/></g></svg>;
   if (theme === 'retro') return <svg {...common}><rect x="90" y="90" width="820" height="520" rx="22" fill="none" stroke="#8b5738" strokeWidth="5" opacity=".12"/><g fill="#73442f" opacity=".08"><circle cx="140" cy="160" r="2"/><circle cx="340" cy="280" r="3"/><circle cx="760" cy="190" r="2"/><circle cx="620" cy="510" r="3"/></g><path d="M0 620Q280 560 520 620T1000 610V700H0Z" fill="#8b5738" opacity=".1"/></svg>;
