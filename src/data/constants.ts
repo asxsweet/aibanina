@@ -628,6 +628,42 @@ export const DAILY_MESSAGES: DailyMessage[] = [
     questionHint: 'Либо жылулықты?',          // міндетті емес
     questionCategory: 'relationship',  // favorites | memory | relationship | future | fun
   },
+  {
+    id: 81,
+    dayNumber: 81,
+    question: '«Cаған бір суперспособность таңдауға берілді ,қандай способность таңдайтын едің?»',   // ← міндетті
+    questionHint: 'Жауап бер',          // міндетті емес
+    questionCategory: 'relationship',  // favorites | memory | relationship | future | fun
+  },
+  {
+    id: 82,
+    dayNumber: 82,
+    question: '«Бала кезіңде қандай болдың?»',   // ← міндетті
+    questionHint: 'Шошаңдап қалған болғансың ба алде тыныш баламедің?',          // міндетті емес
+    questionCategory: 'relationship',  // favorites | memory | relationship | future | fun
+  },
+  {
+    id: 83,
+    dayNumber: 83,
+    question: '«Біздің арамызда бәріі керемет болу үшін менің саған деген шынайылылыңым қандай денгейде болу керек?»',   // ← міндетті
+    questionHint: 'Жауап бер...',          // міндетті емес
+    questionCategory: 'relationship',  // favorites | memory | relationship | future | fun
+  },
+     {
+    id: 84,
+    dayNumber: 84,
+    title: 'Жарығым',
+    text: 'Сені көрген күн,нұрын төгуге ұялады ал ай саулесін шашуға жасқанады,Ал көктем қайта қайта оралғысы келе береді. ',
+    hint: 'Сен менің жарығымсың'
+  },
+  {
+    id: 85,
+    dayNumber: 85,
+    title: 'Араб One',
+    text: 'Сенімен сөйлескен сайын,сұлулығың арта түсетіндей ',
+    hint: 'жалғасы бар просто сыймайды...'
+  },
+
   
 ];
 
