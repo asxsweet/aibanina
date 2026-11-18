@@ -661,7 +661,7 @@ export const DAILY_MESSAGES: DailyMessage[] = [
     dayNumber: 85,
     title: 'Араб One',
     text: 'Сенімен сөйлескен сайын,сұлулығың арта түсетіндей ',
-    hint: 'жалғасы бар просто сыймайды...'
+    hint: 'жалғасы бар просто сыймайды.....'
   },
 
   
